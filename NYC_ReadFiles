@@ -1,0 +1,312 @@
+
+
+# install.packages('unixtools', repos = 'http://www.rforge.net/') 
+# unixtools::set.tempdir("D:\\")
+# 
+# write("TMP = 'D:\\'", file=file.path(Sys.getenv('R_USER'), '.Renviron'))
+
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+
+setwd('D:\\bigquery\\SFbikes')
+
+
+
+# Bike data ======================================================
+nyc_bikes <- data.table(readRDS('NY_BikeTrips.RDS'))
+
+head(nyc_bikes)
+
+
+
+
+# subset the data, to explore and create what I want 
+# this way you make faster progress from the befinning
+# and once you have a model you are happy with, you 
+# apply the mdoel to the entire data set
+
+set.seed(12)
+
+system.time({
+  sampleNYCbikes <- nyc_bikes %>%
+  filter(row_number() %in% sample(1:nrow(nyc_bikes), 10000, replace = FALSE))
+  
+})
+
+system.time({
+  sampleNYCbikes2 <- nyc_bikes[sample(1:nrow(nyc_bikes), 10000, replace = FALSE)]
+  
+})
+
+
+table(lubridate::year(sampleNYCbikes2$starttime))
+
+ggplot(data = sampleNYCbikes2, aes(x = starttime))+
+  geom_bar(stat = 'count')
+
+# work with the sample _____ or
+# sampleNYCbikes3 <- sampleNYCbikes2[,
+#                                    .N,
+#                                    by = .(month(starttime), year(starttime))]
+
+# __________ with the whole aggregated
+
+# By month ____________________________________________________
+sampleNYCbikes3 <- nyc_bikes[,
+                             .N,
+                             by = .(month(starttime), year(starttime))]
+
+sampleNYCbikes3[!is.na(month),':='
+                (month2 = factor(month.name[month],
+                                    labels = month.name,
+                                    levels = month.name))]
+
+ggplot(data = sampleNYCbikes3[!is.na(year)], aes(x = month2, y = N))+
+  geom_bar(stat = 'identity') +
+  facet_wrap(~year)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
+        axis.ticks = element_blank())
+
+
+# By time of the day ____________________________________________
+
+# Classiffy the ride in morning/afternoon/evening/night and
+# weekeday or weekend/holiday
+
+# Time of the day
+nyc_bikes[hour(starttime) >= 6 & hour(starttime) < 12,
+          TimeDay := 'Morning'][hour(starttime) >= 12 & hour(starttime) < 16,
+                                TimeDay := 'Afternoon'][hour(starttime) >= 16 & hour(starttime) < 20,
+                                                         TimeDay := 'Evening'][is.na(TimeDay),
+                                                                               TimeDay := 'Night']
+
+# Weekday/Holiday
+library(timeDate)
+
+# Weekday
+nyc_bikes[,
+          WeekDay := wday(starttime, label = TRUE)]
+
+# Holiday
+# Create a vector of holidays on those years
+years <- as.list(unique(year(nyc_bikes$starttime)))
+
+Easter <- lapply(years, function(x) holiday(x, Holiday = 'GoodFriday'))
+Thanksg <- lapply(years, function(x) holiday(x, Holiday = 'USThanksgivingDay'))
+BlackFriday <- lapply(Thanksg, function(x) x+24*60*60)
+MemDay <- lapply(years, function(x) holiday(x, Holiday = 'USMemorialDay'))
+LaborDay <- lapply(years, function(x) holiday(x, Holiday = 'USLaborDay'))
+MLKDay <- lapply(years, function(x) holiday(x, Holiday = 'USMLKingsBirthday'))
+Christmas <- lapply(years, function(x) holiday(x, Holiday = 'ChristmasDay'))
+NYday <- lapply(years, function(x) holiday(x, Holiday = 'NewYearsDay'))
+ChristmasEve <- lapply(years, function(x) holiday(x, Holiday = 'ChristmasEve'))
+IndpDay <- lapply(years, function(x) holiday(x, Holiday = 'USIndependenceDay'))
+
+
+holidays <- c(Easter, Thanksg,BlackFriday,
+              MemDay, LaborDay,
+              MLKDay, Christmas,
+              NYday, ChristmasEve,
+              IndpDay)
+
+
+holidays2 <- lapply(holidays, function(x) as(x, 'POSIXct', strict = TRUE))
+
+holidays3 <- do.call('c', holidays2)
+
+holidays4 <- holidays3[!is.na(holidays3)]
+
+nyc_bikes[starttime %in% holidays4,
+          holiday := 1][is.na(holiday),
+                        holiday := 0]
+
+# Aggregate by Time of the day, Weekday, and holiday
+nyc_bikes_byTime <- nyc_bikes[,
+                              .N,
+                              by = .(year(starttime), month(starttime),
+                                     TimeDay, WeekDay, holiday)]
+
+nyc_bikes_byTime[,
+                 month2 := factor(month.name[month],
+                                  labels = month.name,
+                                  levels = month.name)]
+
+
+
+
+# plots
+
+# Time Day
+
+ggplot(data = nyc_bikes_byTime[!is.na(month),
+                               .(N = sum(N)),
+                               by = .(year, month2, TimeDay)], aes(x = month2, y = N, 
+                                                                   fill = TimeDay)) +
+  geom_bar(stat = 'identity') +
+  facet_wrap(~year) +
+  theme(axis.text = element_text(angle = 90))
+
+# Day of the week
+nyc_bikes_byTime[holiday == 1 | WeekDay %in% c('Sat', 'Sun'),
+                 NoWorkDay := 'No Working Day'][is.na(NoWorkDay),
+                                                NoWorkDay := 'Working Day']
+
+ggplot(data = nyc_bikes_byTime[!is.na(month),
+                               .(N = sum(N)),
+                               by = .(year, month2, NoWorkDay)], aes(x = month2, y = N, 
+                                                                   fill = NoWorkDay)) +
+  geom_bar(stat = 'identity') +
+  facet_wrap(~year) +
+  theme(axis.text = element_text(angle = 90))
+
+
+saveRDS(nyc_bikes_byTime, 'NYC_Bikes_Aggr_Time.RDS')
+
+
+
+# Green Taxi Data =============================
+
+taxiG <- list()
+for(year_taxi in 2014:2018){
+  
+  taxi_file <- data.table(readRDS(paste0('NY_TaxTrips_G', year_taxi, '.RDS')))
+  
+  # Time of the day
+  taxi_file[hour(pickup_datetime) >= 6 & hour(pickup_datetime) < 12,
+            TimeDay := 'Morning'][hour(pickup_datetime) >= 12 & hour(pickup_datetime) < 16,
+                                  TimeDay := 'Afternoon'][hour(pickup_datetime) >= 16 & hour(pickup_datetime) < 20,
+                                                          TimeDay := 'Evening'][is.na(TimeDay),
+                                                                                TimeDay := 'Night']
+  # Holidays
+  taxi_file[pickup_datetime %in% holidays4,
+            holiday := 1][is.na(holiday),
+                          holiday := 0]
+  
+  # Weekday
+  taxi_file[,
+            WeekDay := wday(pickup_datetime, label = TRUE)]
+  
+  # Working day
+  taxi_file[holiday == 1 | WeekDay %in% c('Sat', 'Sun'),
+            NoWorkDay := 'No Working Day'][is.na(NoWorkDay),
+                                           NoWorkDay := 'Working Day']
+  
+  
+  #  ____ agregate year-month
+  taxi_file2 <- taxi_file[,
+                          .N,
+                          by = .(year(pickup_datetime), month(pickup_datetime),
+                                 TimeDay, NoWorkDay)]
+  
+  taxiG[[which(c(2014:2018) == year_taxi)]] <- taxi_file2
+  
+  print(year_taxi)
+  
+}
+
+taxiG_2 <- Reduce(function(a, b) rbind(a, b, fill = TRUE), taxiG)
+ 
+taxiG_3 <- copy(taxiG_2)
+# taxiG_3 <- taxiG_2[,
+#                    .N,
+#                    by = .(year(pickup_datetime), month(pickup_datetime))]
+
+taxiG_3[!is.na(month),':='
+        (month2 = factor(month.name[month],
+                         labels = month.name,
+                         levels = month.name))]
+
+
+saveRDS(taxiG_3, 'TaxiG_time.RDS')
+
+
+
+
+# save the aggregated files
+saveRDS(sampleNYCbikes3[!is.na(year)], 'Aggr_bikes.RDS')
+saveRDS(taxiG_3[N >= 500], 'Agg_Gtaxis.RDS')
+
+sampleNYCbikes3[,
+                vehicle := 'bike']
+taxiG_3[,
+        vehicle := 'taxiG']
+
+all_data <- rbind(sampleNYCbikes3[!is.na(year)],
+                  taxiG_3[N >= 500])
+#saveRDS(all_data, 'Bike_TaxiG.RDS')
+
+sampleNYCbikes3 <- readRDS('Aggr_bikes.RDS')
+taxiG_3 <- readRDS('Agg_Gtaxis.RDS')
+
+
+ggplot(data = sampleNYCbikes3[!is.na(year)], aes(x = month2, y = N))+
+  geom_bar(stat = 'identity') +
+  geom_bar(data = taxiG_3[(year %in% c(2014:2018))], aes(x = month2, y = N), stat = 'identity', fill = 'green', alpha = 0.5)+
+  facet_wrap(~year)+
+  theme(plot.background = element_blank(), 
+        axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
+        axis.ticks = element_blank())
+
+ggplot(data = all_data[vehicle == 'bike'], aes(x = month2, y = N))+
+  geom_bar(stat = 'identity', fill = 'darkorange') +
+  geom_bar(data = all_data[vehicle == 'taxiG'], aes(x = month2, y = N), stat = 'identity', fill = 'green', alpha = 0.5)+
+  facet_wrap(~year)+
+  scale_fill_manual(name = 'Vehicle', labels = list('Bike' = 'darkorange',
+                                                    'Green Taxi' = 'green')) +
+  theme(plot.background = element_blank(), 
+        axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
+        axis.ticks = element_blank(),
+        legend.position = 'bottom')
+
+
+ggplot(data = all_data, aes(x = month2, y = N, fill = vehicle, alpha = 0.5))+
+  geom_bar(stat = 'identity', position = position_dodge(width = 0), width = 0.9) +
+  guides(alpha = FALSE) +
+  #geom_bar(data = all_data[vehicle == 'taxiG'], aes(x = month2, y = N), stat = 'identity', fill = 'green', alpha = 0.5)+
+  facet_wrap(~year)+
+  scale_fill_manual(name = 'Vehicle', 
+                    values = c('bike' = 'darkorange',
+                               'taxiG' = 'green'),
+                    labels = c('bike' = 'Bikes',
+                               'taxiG' = 'Green Taxi')) +
+  theme(plot.background = element_blank(), 
+        axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
+        axis.ticks = element_blank(),
+        legend.position = 'right',
+        legend.direction = 'vertical')
+
+
+
+# Visualizations
+# 1- Times of the day: do they change along the year?
+# How is it between weekdays and weekends?
+# 2 - Map with pick up stations/drop off stations
+# for taxis need to group them by zones
+# For Bikes and Taxis
+# How do they change along the year?
+# How do they change from weekdays to weekends?
+
+
+# 2 - MAPPING ==================================
+library(leaflet)
+
+# working for now with only one year of data
+
+Gtaxi_2015 <- data.table(readRDS(paste0('NY_TaxTrips_G2015.RDS')))
+
+
+Gtaxi_2015_start <- subset(Gtaxi_2015,
+                           select = c(pickup_datetime, 
+                                      pickup_longitude, pickup_latitude,
+                                      trip_distance))
+
+
+setnames(Gtaxi_2015_start, c('pickup_longitude', 'pickup_latitude'),
+         c('longitude', 'latitude'))
+
+leaflet(Gtaxi_2015_start) %>% addCircles()
+
+
+

@@ -1,0 +1,248 @@
+
+library(shiny)
+library(shinydashboard)
+library(ggplot2)
+library(plotly)
+library(data.table)
+library(DT)
+library(tableHTML)
+library(dplyr)
+
+
+
+
+# 1 - UI ========================================================================================================================
+
+# data
+bike_data <- readRDS('Aggr_bikes.RDS')
+taxiG_data <- readRDS('Agg_Gtaxis.RDS')
+all_data <- readRDS('Bike_TaxiG.RDS')
+bike_time <- readRDS('NYC_Bikes_Aggr_Time.RDS')
+taxiG_time <- readRDS('TaxiG_time.RDS')
+
+
+
+# dashboardPage has 3 components: header, sidebar, body
+
+ui <- dashboardPage(skin='blue',
+                    
+                    # --------------------------- a) header --------------------------------------------       
+                    dashboardHeader(title = 'NYC Commute'),   
+                    
+                    
+                    # --------------------------- b) sidebar -------------------------------------------       
+                    dashboardSidebar(#disable = TRUE,
+                      
+                      sidebarMenu( id = 'sidebar', #for boomarking and restoring selected tabs http://shiny.rstudio.com/articles/bookmarking-state.html
+                                   
+                                   # Tabs #
+                                   menuItem('Graphs', tabName = 'graphs', icon = icon('dashboard')),
+                                   menuItem('Tables', tabName = 'tables', icon = icon('table'))
+                      ),
+                      
+                      
+                      fluidRow(
+                        
+                        # box(width = 12, background = 'black',
+                        #     checkboxGroupInput(inputId = 'vehicle',
+                        #                        label = 'Select Type of Vehicle',
+                        #                        choices = list('Green Taxi' = 'taxiG', 'Public Bike' = 'bike'),
+                        #                        selected = 'Public Bike')),
+                        box(width = 12, 
+                            selectInput(inputId = 'checkyear',
+                                        label = 'Select Year',
+                                        choices = sort(unique(all_data$year)),
+                                        selected = 2018))
+                        
+                      )
+                      
+                    ), #dashboardsidebar
+                    
+                    
+                    # --------------------------- c) body ----------------------------------------------
+                    dashboardBody(
+
+                      # Tabs #
+                       tabItems(
+                      
+                      #   # TAB 1 ___________________________
+                         tabItem(tabName = 'graphs',
+
+
+                              fluidRow(
+
+                                  
+                                  box(width = 8, # rows have a grid of 12
+                                      title = 'Total Rides',
+                                      solidHeader = TRUE,
+                                      status='primary',
+                                      plotOutput('totalRidesMonth',
+                                                 height = 350))
+
+                                ), 
+                              
+                              fluidRow(
+                                
+                                box(width = 6,
+                                    title = 'Bike Rides WHEN',
+                                    plotOutput('bikesByTime',
+                                               height = 350),
+                                    radioButtons(inputId = 'checktime',
+                                                 label = 'Select Time Type',
+                                                 choices = c('Time of the day', 'Weekday/Weekend'),
+                                                 selected = 'Time of the day')),
+                                box(width = 6,
+                                    title = 'Green Taxi Rides WHEN',
+                                    plotOutput('GtaxiByTime'))
+                                
+                              )
+
+
+                        )
+
+                      ) #tabitems
+
+                    ) #dasboardbody
+                    
+) # dashboardpage
+
+
+# 2 - SERVER Define server logic required ==================================================================================
+# Instructions that the app needs to build up the graphs/tables
+# INPUTS; Things that the user can select - provides values to the app.
+# OUTPUTS: R objects that the user sees.
+# You will put inputs and outputs in the fluidPage - you add inputs with Input functions, and outputs with Output functions.
+
+server <- shinyServer(function(input, output) {
+  
+  all_data_subset <- reactive({
+   # req(input$checkvehicle) # ensure availablity of value before proceeding
+    req(input$checkyear)
+
+    
+    data.table(all_data %>% filter(year %in% input$checkyear))
+                                   
+  })
+  
+
+  bikes_time_subset <- reactive({
+    
+    req(input$checkyear)
+    req(input$checktime)
+    
+    data.table(bike_time %>% filter(year %in% input$checkyear))
+    
+  })
+  
+  
+  taxisG_time_subset <- reactive({
+    
+    req(input$checkyear)
+    req(input$checktime)
+    
+    data.table(taxiG_time %>% filter(year %in% input$checkyear))
+    
+  })
+  
+  
+  
+  
+  #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  # 1 - BikesTaxi Plot ---------
+  #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  
+  output$totalRidesMonth <- renderPlot({
+    
+   
+    ggplot(data = all_data_subset(), aes(x = month2, y = N, fill = vehicle, alpha = 0.5))+
+      geom_bar(stat = 'identity', position = position_dodge(width = 0.3), width = 0.9) +
+      guides(alpha = FALSE) +
+      scale_fill_manual(name = 'Vehicle', 
+                        values = c('bike' = 'darkorange',
+                                   'taxiG' = 'green'),
+                        labels = c('bike' = 'Bikes',
+                                   'taxiG' = 'Green Taxi')) +
+      theme(plot.background = element_blank(), 
+            axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
+            axis.ticks = element_blank(),
+            legend.position = 'right',
+            legend.direction = 'vertical')
+
+  })
+  
+  
+  
+  
+  #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  # 2 - Bikes Time Plot ---------
+  #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  
+  output$bikesByTime <- renderPlot({
+    
+    
+    if(input$checktime == 'Time of the day') {variable_to_group <- 'TimeDay'} else {variable_to_group <-'NoWorkDay'}
+    
+    ggplot(data = bikes_time_subset()[!is.na(month),
+                                   .(N = sum(N)),
+                                   by = c('year', 'month2', variable_to_group)], aes(x = month2, y = N, 
+                                                                                     fill = get(variable_to_group))) +
+      geom_bar(stat = 'identity') +
+      theme(axis.text = element_text(angle = 90))
+
+    
+  })
+  
+  
+  
+  
+  
+  
+  #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  # 3 - GreenTaxi Time Plot -----
+  #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  
+  output$GtaxiByTime <- renderPlot({
+    
+    
+    if(input$checktime == 'Time of the day') {variable_to_group <- 'TimeDay'} else {variable_to_group <-'NoWorkDay'}
+    
+    ggplot(data = taxisG_time_subset()[!is.na(month),
+                                      .(N = sum(N)),
+                                      by = c('year', 'month2', variable_to_group)], aes(x = month2, y = N, 
+                                                                                        fill = get(variable_to_group))) +
+      geom_bar(stat = 'identity') +
+      theme(axis.text = element_text(angle = 90))
+    
+    
+  })
+  
+  
+  
+  
+  #^^^^^^^^^^^^^^^^^^^^^
+  # First Table --------
+  #^^^^^^^^^^^^^^^^^^^^^
+  
+  # output$InitialVsFinalTable<- renderDT({
+  #   
+  #  
+  #   
+  # },
+  # rownames = FALSE,
+  # extensions = 'Buttons',
+  # options = list(
+  #   pageLength = 200, # how many entries to show
+  #   scrollX = TRUE,
+  #   dom = 'Bfrtip', # to allow the csv/excel buttons. Bfrtip: button filtering processing table information pagination
+  #   buttons = c('copy', 'excel', 'pdf')
+  # )
+  # )
+  
+  
+}) #server
+  
+# 3 - RUN the application ===================================================================================================
+# Calls the App
+shinyApp(ui = ui, server = server)
+
+

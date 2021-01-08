@@ -7,6 +7,7 @@ library(data.table)
 library(DT)
 library(tableHTML)
 library(dplyr)
+library(leaflet)
 
 
 
@@ -20,39 +21,105 @@ all_data <- readRDS('Bike_TaxiG.RDS')
 bike_time <- readRDS('NYC_Bikes_Aggr_Time.RDS')
 taxiG_time <- readRDS('TaxiG_time.RDS')
 
+taxisG_map <- readRDS('grouped_Gtaxi_ALL.RDS')
+taxisG_map <- taxisG_map[complete.cases(lat) | 
+                         complete.cases(long),]
+taxisG_map[,
+           fullLabel := paste0(zone,': ', N)]
+
+NYCbike_map <- readRDS('NYCbike_Map.RDS')
+NYCbike_map <- NYCbike_map[complete.cases(lat) | 
+                   complete.cases(long),]
+NYCbike_map[,
+           fullLabel := paste0(zone,': ', N)]
 
 
 # dashboardPage has 3 components: header, sidebar, body
 
-ui <- dashboardPage(skin='blue',
+ui <- fluidPage(
+  
+  
+                 # HTML - to change the css of the page ------------------------
+                 tags$style(".main-sidebar {padding-top: 75px}"),
+  
+                 tags$head(tags$style(
+                     HTML('
+         
+                           #sidebarCollapsed {
+                           background-color: #5AAA66;
+                           }
+                          
+                          .tab-content > .active > .body {color: #fff}
+                          .container-fluid {background-color: #5AAA66}
+                          .content-wrapper {background-color: #5AAA66; color: #fff}
+                         
+                          
+                          .box.box-solid.box-primary.box-header {background-color: #5AAA66}
+                          .box.box-primary {border-top-color:#F39B37}
+                          .box {border-top-color:#F39B37}
+
+                          .main-header {max-height:75px; background-color:#478851; height:100%; position:absolute; width:100%}
+    
+                          .skin-blue .main-header .logo {background-color:#5AAA66; width:150%;  font-size:30px; display:contents; font-weight:bold; }
+                          .skin-blue .main-header .logo:hover {background-color:#5AAA66;}
+                          .skin-blue .main-header .navbar {background-color:#5AAA66; float:left; position:absolute;  }
+
+                          .skin-blue .wrapper {background-color:#5AAA66}
+    
+                          .skin-blue.sidebar-menu > li.active > a {color:#fff}
+                          
+                          .box {background-color:#478851;}
+                          .box-header .box-title {color: #fff}
+                          
+                         
+                          .skin-blue .sidebar-menu li.active > a {
+                          background: #F39B37;
+                          border-left-color: #F39B37
+                          }
+                          
+                          .skin-blue .sidebar a {color:#fff; background:#478851}
+                          .skin-blue .sidebar-menu > li > a {border-left:0px; background:#478851}
+                          .skin-blue .sidebar-menu > li:hover > a {background:#FABB53}
+                          
+                          .skin-blue .sidebar-menu > a:hover {
+                          background: #fff;
+                          border-left-color: #fff
+                          }
+         
+                     ')
+                  )),
+  
+                  dashboardPage(skin='blue',
+                    
+                   
                     
                     # --------------------------- a) header --------------------------------------------       
-                    dashboardHeader(title = 'NYC Commute'),   
+                    dashboardHeader(title = span(img(src="logo6.png", width = 250, height = 75), tags$b('NYC Commute')),
+                                    tags$li(tags$style(".main-header {max-height: 75}"),
+                                            tags$style(".main-header .logo {height: 75, width: 90px}"),
+                                            class = "dropdown")),   
                     
                     
                     # --------------------------- b) sidebar -------------------------------------------       
-                    dashboardSidebar(#disable = TRUE,
+                    dashboardSidebar(width = 250, #disable = TRUE,
+                      
+                      tags$style(".tab-content {padding-top: 100px}"),
                       
                       sidebarMenu( id = 'sidebar', #for boomarking and restoring selected tabs http://shiny.rstudio.com/articles/bookmarking-state.html
                                    
                                    # Tabs #
-                                   menuItem('Graphs', tabName = 'graphs', icon = icon('dashboard')),
-                                   menuItem('Tables', tabName = 'tables', icon = icon('table'))
+                                   menuItem('Graphs', tabName = 'graphs'),
+                                   menuItem('Maps', tabName = 'maps')
                       ),
                       
                       
                       fluidRow(
                         
-                        # box(width = 12, background = 'black',
-                        #     checkboxGroupInput(inputId = 'vehicle',
-                        #                        label = 'Select Type of Vehicle',
-                        #                        choices = list('Green Taxi' = 'taxiG', 'Public Bike' = 'bike'),
-                        #                        selected = 'Public Bike')),
                         box(width = 12, 
                             selectInput(inputId = 'checkyear',
                                         label = 'Select Year',
                                         choices = sort(unique(all_data$year)),
-                                        selected = 2018))
+                                        selected = 2014))
                         
                       )
                       
@@ -61,6 +128,7 @@ ui <- dashboardPage(skin='blue',
                     
                     # --------------------------- c) body ----------------------------------------------
                     dashboardBody(
+                      
 
                       # Tabs #
                        tabItems(
@@ -74,7 +142,6 @@ ui <- dashboardPage(skin='blue',
                                   
                                   box(width = 8, # rows have a grid of 12
                                       title = 'Total Rides',
-                                      solidHeader = TRUE,
                                       status='primary',
                                       plotOutput('totalRidesMonth',
                                                  height = 350))
@@ -98,13 +165,55 @@ ui <- dashboardPage(skin='blue',
                               )
 
 
-                        )
+                        ),
+                        
+                        tabItem(tabName = 'maps',
+                                # for the map to go all the way in height
+                                tags$style(type = "text/css", "#map {height: calc(100vh - 80px) !important;}"),
+                                
+                                fluidRow(
+                                  
+                                  box(width = 3,
+                                      radioButtons(inputId = 'checkvehicle',
+                                                   label = 'Select Transportation Method',
+                                                   choices = c('Bike', 'Green Taxi'),
+                                                   selected = 'Green Taxi')),
+                                  
+                                  box(width = 3,
+                                      #height = 100,
+                                      radioButtons(inputId = 'checktimeday',
+                                                   label = 'Select Time of the Day',
+                                                   inline = TRUE,
+                                                   choices = c('Morning', 'Afternoon', 'Evening', 'Night'),
+                                                   selected = 'Morning')),
+                                  box(width = 3,
+                                      radioButtons(inputId = 'checkworkingday',
+                                                   label = 'Select Type of Day',
+                                                   choices = list('Work Day'='Working Day',
+                                                                  'Weekend/Holiday' = 'No Working Day'),
+                                                   selected = 'Working Day')),
+                                  
+                                  box(width = 3,
+                                      radioButtons(inputId = 'checkridetype',
+                                                   label = 'Select Ride Type',
+                                                   choices = list('Pick Up', 'Drop Off'),
+                                                   selected = 'Pick Up'))
+                                ),
+                                
+                                fluidRow(
+                                  
+                                  box(width = 12,
+                                      height = 600,
+                                      title = 'Usage Location',
+                                      leafletOutput('maptaxig'))
+                                ))
 
                       ) #tabitems
 
                     ) #dasboardbody
                     
 ) # dashboardpage
+) # fluidpage
 
 
 # 2 - SERVER Define server logic required ==================================================================================
@@ -144,6 +253,34 @@ server <- shinyServer(function(input, output) {
     
   })
   
+  
+  taxisG_map_subset <- reactive({
+
+    req(input$checktimeday)
+    req(input$checkworkingday)
+    req(input$checkridetype)
+    req(input$checkyear)
+
+    data.table(taxisG_map %>% filter(TimeDay %in% input$checktimeday & 
+                                       NoWorkDay %in% input$checkworkingday &
+                                       year %in% input$checkyear &
+                                       type %in% input$checkridetype))
+  })
+  
+  
+  
+  bike_map_subset <- reactive({
+    
+    req(input$checktimeday)
+    req(input$checkworkingday)
+    req(input$checkridetype)
+    req(input$checkyear)
+    
+    data.table(NYCbike_map %>% filter(TimeDay %in% input$checktimeday & 
+                                       NoWorkDay %in% input$checkworkingday &
+                                       year %in% input$checkyear &
+                                       type %in% input$checkridetype))
+  })
   
   
   
@@ -217,6 +354,58 @@ server <- shinyServer(function(input, output) {
   })
   
   
+  
+  #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  # 4 - Green Taxi Map -----
+  #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  
+  output$maptaxig <- renderLeaflet({
+    
+    if (input$checkvehicle == 'Bike') {
+      map_data <- bike_map_subset() #NYCbike_map
+      color_circle <- 'blue'
+      sizeT <- 20
+      }
+    if (input$checkvehicle == 'Green Taxi') {
+      map_data <- taxisG_map_subset() #taxisG_map
+      color_circle <- 'green'
+      sizeT <- 50
+    
+    }
+    
+    
+    # map_data2 <- taxisG_map[type %in% input$checkridetype &
+    #                                 TimeDay %in% input$checktimeday & 
+    #                                 NoWorkDay %in% input$checkworkingday &
+    #                                 year %in% input$checkyear]
+    
+    # leaflet(data = taxisG_map_subset(), options = leafletOptions(preferCanvas = TRUE)) %>%
+      leaflet(data = map_data, options = leafletOptions(preferCanvas = TRUE)) %>%
+      addTiles() %>%
+        fitBounds(~min(long), ~min(lat), ~max(long), ~max(lat)) %>%
+      setView(-74.00, 40.77, zoom = 11) %>%
+      addProviderTiles("CartoDB.Positron") %>%
+      addCircles(lng = ~long, lat = ~lat,
+                 radius = ~N/sizeT, label = ~fullLabel, color = color_circle)
+      
+      
+    
+  })
+  
+  
+  # observe({
+  #   
+  #   map_data2 <- taxisG_map[type %in% input$checkridetype &
+  #                             TimeDay %in% input$checktimeday & 
+  #                             NoWorkDay %in% input$checkworkingday &
+  #                             year %in% input$checkyear]
+  #   
+  #   
+  #   leafletProxy('maptaxig', data = map_data2) %>%
+  #     addCircles(lng = ~long, lat = ~lat,
+  #                radius = ~N/50)
+  #   
+  # })
   
   
   #^^^^^^^^^^^^^^^^^^^^^

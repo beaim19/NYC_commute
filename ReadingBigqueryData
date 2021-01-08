@@ -1,0 +1,269 @@
+# 
+# write("TMPDIR = D:/rtmp/", file=file.path(sub("'", '', Sys.getenv('TMPDIR')), '.Renviron'))
+# write("R_USER = D:/rtmp/", file=file.path(Sys.getenv('R_USER'), '.Renviron'))
+
+
+raster::rasterOptions(tmpdir = "D:/rtmp/")
+write("R_USER = D:/rtmp/", file=file.path(Sys.getenv('R_USER'), '.Renviron'))
+
+
+#write("TMPDIR = 'D:\\'", file=file.path(Sys.getenv('R_USER'), '.Renviron'))
+
+rm(list = ls())
+
+
+#install.packages('devtools') 
+#devtools::install_github("r-dbi/bigrquery")
+
+library(readr)
+library(bigrquery)
+
+library(data.table)
+library(ggplot2)
+library(dplyr)
+
+setwd('D:\\bigquery\\SFbikes')
+setwd('C:\\Users\\Bea\\Documents\\R\\bigquery')
+
+
+# Authentification: open browser to connect with your acount
+bq_auth()
+
+# the credentials are saved here
+# ~/.R/gargle/gargle-oauth
+
+
+# with dbConnect
+library(DBI)
+
+
+# STATION -------------------------------------------------------------------------
+my_billing <- 'bikessf-291307'
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bikessf",
+  dataset = "bikeshare_station_info",
+  billing = my_billing
+)
+
+SFbike_stations <- dbGetQuery(
+  con, 
+  "SELECT station_id, name, short_name, lat, lon, region_id, rental_methods,capacity,
+          eightd_has_key_dispenser, has_kiosk
+        FROM `bigquery-public-data.san_francisco_bikeshare.bikeshare_station_info`"
+)
+
+setDT(SFbike_stations)
+saveRDS(SFbike_stations, 'SFbike_stations.RDS')
+
+
+
+# NYC bikes STATION IDs -------------------------------------------------------------------------
+my_billing <- 'bikessf-291307'
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bikessf",
+  dataset = "citibike_stations",
+  billing = my_billing
+)
+
+NYCbike_stations <- dbGetQuery(
+  con, 
+  "SELECT station_id, latitude, longitude, name
+  FROM `bigquery-public-data.new_york_citibike.citibike_stations`"
+)
+
+setDT(NYCbike_stations)
+saveRDS(NYCbike_stations, 'NYCbike_stations.RDS')
+
+
+# REGIONS - it gives the region IDs -----------------------------------------
+my_billing <- 'bikessf-291307'
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bikessf",
+  dataset = "bikeshare_regions",
+  billing = my_billing
+)
+
+SFbike_regions <- dbGetQuery(
+  con, 
+  "SELECT *
+        FROM `bigquery-public-data.san_francisco_bikeshare.bikeshare_regions`", 
+  n = 10
+)
+
+
+setDT(SFbike_regions)
+saveRDS(SFbike_regions, 'SFbike_regions.RDS')
+
+
+# STATION STATUS ----------------------------------------------------
+my_billing <- 'bikessf-291307'
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bikessf",
+  dataset = "bikeshare_station_status",
+  billing = my_billing
+)
+
+SFbike_station_status <- dbGetQuery(
+  con, 
+  "SELECT *
+        FROM `bigquery-public-data.san_francisco_bikeshare.bikeshare_station_status`", 
+  n = 10
+)
+
+
+setDT(SFbike_station_status)
+
+
+
+# TRIPS ------------------------
+my_billing <- 'bikessf-291307'
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bikessf",
+  dataset = "bikeshare_trips",
+  billing = my_billing
+)
+
+SFbike_trips <- dbGetQuery(
+  con, 
+  "SELECT trip_id, duration_sec, start_date, start_station_name, start_station_id,
+          end_date, end_station_name, end_station_id, 
+          bike_number, 
+          zip_code, subscriber_type, c_subscription_type, 
+          start_station_latitude, start_station_longitude, 
+          end_station_latitude, end_station_longitude, 
+          member_birth_year, member_gender,
+          bike_share_for_all_trip
+        FROM `bigquery-public-data.san_francisco_bikeshare.bikeshare_trips`",
+  options(scipen = 20)
+)
+
+
+setDT(SFbike_trips)
+saveRDS(SFbike_trips, 'SF_BikeTrips.RDS')
+
+
+# trips from San Francisco table ____________________________________________
+my_billing <- 'bikessf-291307'
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bikessf",
+  dataset = "bikeshare_trips",
+  billing = my_billing
+)
+
+SFbike_tripsSF <- dbGetQuery(
+  con, 
+  "SELECT start_station_name, start_station_id, end_date, end_station_name,
+          end_station_id, bike_number, zip_code, subscriber_type
+        FROM `bigquery-public-data.san_francisco.bikeshare_trips`",
+  options(scipen = 20)
+)
+
+
+setDT(SFbike_tripsSF)
+saveRDS(SFbike_tripsSF, 'SF_BikeTripsSFtable.RDS')
+
+
+# Explore the data --------------------------------------------------------------------
+
+SFbike_trips <- data.table(readRDS('SF_BikeTrips.RDS'))
+SFbike_tripsSF <- data.table(readRDS('SF_BikeTripsSFtable.RDS'))
+
+str(SFbike_trips)
+summary(SFbike_trips)
+
+
+# Find proportion of NAs by variable
+
+countNA <- function(dt){
+  
+  return(dt[,
+            lapply(.SD, function(x) round(100*sum(is.na(x)*1)/nrow(dt))),
+            .SDcols = names(dt)])
+}
+
+countNA(SFbike_trips)
+countNA(SFbike_tripsSF)
+
+
+
+# is the data without gender spread accross years?
+table(SFbike_trips$member_gender, lubridate::year(SFbike_trips$start_date))
+
+# gender started to be collected in 2017/2018
+# some members might have record in that year and years before,
+# but there is not member ID
+
+
+# Explore dates 
+
+table(lubridate::year(SFbike_trips$start_date))
+table(lubridate::year(SFbike_trips$start_date), lubridate::month(SFbike_trips$start_date))
+
+table(lubridate::year(SFbike_tripsSF$end_date), lubridate::month(SFbike_tripsSF$end_date))
+# it's the same database but missing 2017 and 2018
+
+# missing data for some months for 2013, 2016, 2017 and 2018
+
+
+
+# Taxis ______________________
+my_billing <- 'bikessf-291307'
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bikessf",
+  dataset = "tlc_yellow_trips_2015",
+  billing = my_billing
+)
+
+options(digits = 10)
+
+for (i in seq(50000001, 60000001, 5000000)){
+  
+  bq_auth()
+  
+  tempfile(pattern = 'bikenyc', tmpdir = tempdir())
+  print(i)
+  
+  file_downloaded <- dbGetQuery(
+  con, 
+  sprintf(paste0("SELECT *
+  FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2015`
+  LIMIT ", i+4999999, " OFFSET ", i)),
+  options(scipen = 20)
+)
+  
+  setDT(file_downloaded)
+  saveRDS(file_downloaded, paste0('NY_TaxTrips_Y2015_', i, '.RDS'))
+  print(i)
+  file.remove(list.files(tempfile(), full.names = TRUE, pattern = '^RTm'))
+}
+
+
+file_downloaded <- dbGetQuery(
+  con, 
+  sprintf(paste0("SELECT *
+                 FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2015`
+                 LIMIT 75000000")),
+  options(scipen = 20))
+
+
+
+setDT(file_downloaded)
+saveRDS(file_downloaded, 'NY_TaxTrips_Y2015_1_75000000.RDS')
+
+# Explore dates 
+table(lubridate::month(NYtaxi_trips_yellow2015_1_10MILL$pickup_datetime))
+
+
+
+
+
+
+
+

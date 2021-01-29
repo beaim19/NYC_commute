@@ -8,6 +8,7 @@ library(DT)
 library(tableHTML)
 library(dplyr)
 library(leaflet)
+library(scales)
 
 
 
@@ -15,23 +16,22 @@ library(leaflet)
 # 1 - UI ========================================================================================================================
 
 # data
-bike_data <- readRDS('Aggr_bikes.RDS')
-taxiG_data <- readRDS('Agg_Gtaxis.RDS')
 all_data <- readRDS('Bike_TaxiG.RDS')
 bike_time <- readRDS('NYC_Bikes_Aggr_Time.RDS')
 taxiG_time <- readRDS('TaxiG_time.RDS')
 
-taxisG_map <- readRDS('grouped_Gtaxi_ALL.RDS')
-taxisG_map <- taxisG_map[complete.cases(lat) | 
-                         complete.cases(long),]
-taxisG_map[,
-           fullLabel := paste0(zone,': ', N)]
+taxisG_map <- data.table(readRDS('grouped_Gtaxi_ALL_complete_month.RDS'))
 
-NYCbike_map <- readRDS('NYCbike_Map.RDS')
-NYCbike_map <- NYCbike_map[complete.cases(lat) | 
-                   complete.cases(long),]
-NYCbike_map[,
-           fullLabel := paste0(zone,': ', N)]
+NYCbike_map <- data.table(readRDS('NYCbike_Map_Month_NoGender.RDS'))
+
+NATaxiGmap <- data.table(readRDS('grouped_Gtaxi_ALL.Rds'))
+NABikeMap <- data.table(readRDS('NYCbike_Map_all_stations.RDS'))
+NATaxiGmap_long <- NATaxiGmap[is.na(long),
+                              .(N = sum(N)),
+                              by = .(year, type)]
+NABikeMap_long <- NABikeMap[is.na(long),
+                              .(N = sum(N)),
+                              by = .(year, type)]
 
 
 # dashboardPage has 3 components: header, sidebar, body
@@ -47,6 +47,7 @@ ui <- fluidPage(
          
                            #sidebarCollapsed {
                            background-color: #5AAA66;
+
                            }
                           
                           .tab-content > .active > .body {color: #fff}
@@ -62,7 +63,7 @@ ui <- fluidPage(
     
                           .skin-blue .main-header .logo {background-color:#5AAA66; width:150%;  font-size:30px; display:contents; font-weight:bold; }
                           .skin-blue .main-header .logo:hover {background-color:#5AAA66;}
-                          .skin-blue .main-header .navbar {background-color:#5AAA66; float:left; position:absolute;  }
+                          .skin-blue .main-header .navbar {display:none }
 
                           .skin-blue .wrapper {background-color:#5AAA66}
     
@@ -78,7 +79,10 @@ ui <- fluidPage(
                           }
                           
                           .skin-blue .sidebar a {color:#fff; background:#478851}
-                          .skin-blue .sidebar-menu > li > a {border-left:0px; background:#478851}
+                          .skin-blue .sidebar-menu > li > a {border-left:0px; background:#478851;
+border-top:3px;
+border-radius:3px;
+                          border-top-color:#F39B37;}
                           .skin-blue .sidebar-menu > li:hover > a {background:#FABB53}
                           
                           .skin-blue .sidebar-menu > a:hover {
@@ -94,7 +98,7 @@ ui <- fluidPage(
                    
                     
                     # --------------------------- a) header --------------------------------------------       
-                    dashboardHeader(title = span(img(src="logo6.png", width = 250, height = 75), tags$b('NYC Commute')),
+                    dashboardHeader(title = span(img(src="logo8.png", width = 250, height = 75), tags$b('New York City Commute')),
                                     tags$li(tags$style(".main-header {max-height: 75}"),
                                             tags$style(".main-header .logo {height: 75, width: 90px}"),
                                             class = "dropdown")),   
@@ -103,23 +107,34 @@ ui <- fluidPage(
                     # --------------------------- b) sidebar -------------------------------------------       
                     dashboardSidebar(width = 250, #disable = TRUE,
                       
-                      tags$style(".tab-content {padding-top: 100px}"),
+                      tags$style(".tab-content {padding-top: 50px}"),
                       
                       sidebarMenu( id = 'sidebar', #for boomarking and restoring selected tabs http://shiny.rstudio.com/articles/bookmarking-state.html
                                    
                                    # Tabs #
-                                   menuItem('Graphs', tabName = 'graphs'),
-                                   menuItem('Maps', tabName = 'maps')
+                                  menuItem('Maps', tabName = 'maps'),
+                                  menuItem('Graphs', tabName = 'graphs')
                       ),
                       
+                     
                       
                       fluidRow(
                         
                         box(width = 12, 
                             selectInput(inputId = 'checkyear',
                                         label = 'Select Year',
-                                        choices = sort(unique(all_data$year)),
+                                        choices = 2014:2018,
                                         selected = 2014))
+                        
+                      ),
+                      
+                      fluidRow(
+                        
+                        box(width = 12,
+                            selectInput(inputId = 'checkmonth',
+                                        label = 'Select Month (only for map)',
+                                        choices = c( month.name),
+                                        selected = 'January'))
                         
                       )
                       
@@ -128,6 +143,11 @@ ui <- fluidPage(
                     
                     # --------------------------- c) body ----------------------------------------------
                     dashboardBody(
+                      
+                      
+                      
+                      fluidRow(width = 3,
+                               menuItem('Graphs2', tabName = 'graphs2')),
                       
 
                       # Tabs #
@@ -168,8 +188,7 @@ ui <- fluidPage(
                         ),
                         
                         tabItem(tabName = 'maps',
-                                # for the map to go all the way in height
-                                tags$style(type = "text/css", "#map {height: calc(100vh - 80px) !important;}"),
+
                                 
                                 fluidRow(
                                   
@@ -203,9 +222,12 @@ ui <- fluidPage(
                                 fluidRow(
                                   
                                   box(width = 12,
-                                      height = 600,
+                                      box(width = 12, 
+                                          actionButton(inputId = 'actionhelp',
+                                                       label = 'Click here for number of cases missing location data per year'),
+                                          uiOutput('CoordenateMiss')),
                                       title = 'Usage Location',
-                                      leafletOutput('maptaxig'))
+                                      leafletOutput('maptaxig', height = 500))
                                 ))
 
                       ) #tabitems
@@ -260,11 +282,13 @@ server <- shinyServer(function(input, output) {
     req(input$checkworkingday)
     req(input$checkridetype)
     req(input$checkyear)
+    req(input$checkmonth)
 
     data.table(taxisG_map %>% filter(TimeDay %in% input$checktimeday & 
                                        NoWorkDay %in% input$checkworkingday &
                                        year %in% input$checkyear &
-                                       type %in% input$checkridetype))
+                                       type %in% input$checkridetype &
+                                       month %in% which(month.name == input$checkmonth)))
   })
   
   
@@ -275,11 +299,13 @@ server <- shinyServer(function(input, output) {
     req(input$checkworkingday)
     req(input$checkridetype)
     req(input$checkyear)
+    req(input$checkmonth)
     
     data.table(NYCbike_map %>% filter(TimeDay %in% input$checktimeday & 
                                        NoWorkDay %in% input$checkworkingday &
                                        year %in% input$checkyear &
-                                       type %in% input$checkridetype))
+                                       type %in% input$checkridetype &
+                                       month %in%  which(month.name == input$checkmonth)))
   })
   
   
@@ -296,11 +322,18 @@ server <- shinyServer(function(input, output) {
       guides(alpha = FALSE) +
       scale_fill_manual(name = 'Vehicle', 
                         values = c('bike' = 'darkorange',
-                                   'taxiG' = 'green'),
+                                   'taxiG' = 'darkgreen'),
                         labels = c('bike' = 'Bikes',
                                    'taxiG' = 'Green Taxi')) +
+      scale_y_continuous(label = comma)+
+      theme_bw()+
       theme(plot.background = element_blank(), 
-            axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
+            axis.title = element_blank(),
+            panel.border = element_blank(),
+            axis.line.x.bottom = element_line(color = 'darkgrey'),
+            axis.line.y.left = element_line(color = 'darkgrey'),
+            panel.grid = element_blank(),
+            axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
             axis.ticks = element_blank(),
             legend.position = 'right',
             legend.direction = 'vertical')
@@ -317,14 +350,41 @@ server <- shinyServer(function(input, output) {
   output$bikesByTime <- renderPlot({
     
     
-    if(input$checktime == 'Time of the day') {variable_to_group <- 'TimeDay'} else {variable_to_group <-'NoWorkDay'}
+    if(input$checktime == 'Time of the day') {
+      
+      variable_to_group <- 'TimeDay'
+      valuesFill <- c('Morning' = '#D55E00',
+                      'Afternoon' = '#009E73',
+                      'Evening' = '#CC79A7',
+                      'Night' = '#0072B2')
+    
+    
+    } else {
+      variable_to_group <-'NoWorkDay'
+    valuesFill <- c('Working Day' = '#F0E442',
+                    'No Working Day' = '#56B4E9')
+    }
+    
     
     ggplot(data = bikes_time_subset()[!is.na(month),
                                    .(N = sum(N)),
                                    by = c('year', 'month2', variable_to_group)], aes(x = month2, y = N, 
                                                                                      fill = get(variable_to_group))) +
       geom_bar(stat = 'identity') +
-      theme(axis.text = element_text(angle = 90))
+      scale_y_continuous(label = comma)+
+      scale_fill_manual(name = 'Time of the Day', 
+                        values = valuesFill) +
+      theme_bw()+
+      theme(plot.background = element_blank(), 
+            axis.ticks = element_blank(),
+            axis.title.x = element_blank(),
+            panel.border = element_blank(),
+            axis.line.x.bottom = element_line(color = 'darkgrey'),
+            axis.line.y.left = element_line(color = 'darkgrey'),
+            panel.grid = element_blank(),
+            axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+            legend.title = element_blank(),
+            axis.title.y = element_blank())
 
     
   })
@@ -341,14 +401,39 @@ server <- shinyServer(function(input, output) {
   output$GtaxiByTime <- renderPlot({
     
     
-    if(input$checktime == 'Time of the day') {variable_to_group <- 'TimeDay'} else {variable_to_group <-'NoWorkDay'}
+    if(input$checktime == 'Time of the day') {
+      variable_to_group <- 'TimeDay'
+      valuesFill <- c('Morning' = '#D55E00',
+                      'Afternoon' = '#009E73',
+                      'Evening' = '#CC79A7',
+                      'Night' = '#0072B2')
+      
+    } else {
+        
+      variable_to_group <-'NoWorkDay'
+      valuesFill <- c('Working Day' = '#F0E442',
+                      'No Working Day' = '#56B4E9')
+      
+      }
     
     ggplot(data = taxisG_time_subset()[!is.na(month),
                                       .(N = sum(N)),
                                       by = c('year', 'month2', variable_to_group)], aes(x = month2, y = N, 
                                                                                         fill = get(variable_to_group))) +
       geom_bar(stat = 'identity') +
-      theme(axis.text = element_text(angle = 90))
+      scale_fill_manual(name = 'Time of the Day', 
+                        values = valuesFill) +
+      scale_y_continuous(label = comma)+
+      theme_bw()+
+      theme(plot.background = element_blank(), 
+            axis.ticks = element_blank(),
+            axis.title.x = element_blank(),
+            panel.border = element_blank(),
+            axis.line.x.bottom = element_line(color = 'darkgrey'),
+            axis.line.y.left = element_line(color = 'darkgrey'),
+            panel.grid = element_blank(),
+            axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+            legend.title = element_blank())
     
     
   })
@@ -356,76 +441,146 @@ server <- shinyServer(function(input, output) {
   
   
   #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  # 4 - Green Taxi Map -----
+  # 4 - Maps -----
   #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   
   output$maptaxig <- renderLeaflet({
     
     if (input$checkvehicle == 'Bike') {
       map_data <- bike_map_subset() #NYCbike_map
-      color_circle <- 'blue'
-      sizeT <- 20
+      color_circle <- 'darkorange'
+      sizeT <- 5
+      zoom_setView <- 13
+      lat_setView <- -74.00
+      long_setView <- 40.75
+      
+      
+
       }
     if (input$checkvehicle == 'Green Taxi') {
       map_data <- taxisG_map_subset() #taxisG_map
       color_circle <- 'green'
-      sizeT <- 50
+      sizeT <- 5
+      zoom_setView <- 11
+      lat_setView <- -74.00
+      long_setView <- 40.77
+      
+
     
     }
     
+
+    if (nrow(map_data) > 1){
     
-    # map_data2 <- taxisG_map[type %in% input$checkridetype &
-    #                                 TimeDay %in% input$checktimeday & 
-    #                                 NoWorkDay %in% input$checkworkingday &
-    #                                 year %in% input$checkyear]
-    
-    # leaflet(data = taxisG_map_subset(), options = leafletOptions(preferCanvas = TRUE)) %>%
-      leaflet(data = map_data, options = leafletOptions(preferCanvas = TRUE)) %>%
+      leaflet(data = map_data) %>%
       addTiles() %>%
         fitBounds(~min(long), ~min(lat), ~max(long), ~max(lat)) %>%
-      setView(-74.00, 40.77, zoom = 11) %>%
+      setView(lat_setView, long_setView, zoom = zoom_setView) %>%
       addProviderTiles("CartoDB.Positron") %>%
       addCircles(lng = ~long, lat = ~lat,
                  radius = ~N/sizeT, label = ~fullLabel, color = color_circle)
       
-      
+    } else {
+      leaflet(data = taxisG_map) %>%
+        addTiles() %>%
+        setView(-74.00, 40.77, zoom = 11) %>%
+        addProviderTiles('CartoDB.Position') %>%
+        addControl('No Data available For that selection of vehicle, year and month', 'topleft')
+    }
     
   })
   
   
-  # observe({
-  #   
-  #   map_data2 <- taxisG_map[type %in% input$checkridetype &
-  #                             TimeDay %in% input$checktimeday & 
-  #                             NoWorkDay %in% input$checkworkingday &
-  #                             year %in% input$checkyear]
-  #   
-  #   
-  #   leafletProxy('maptaxig', data = map_data2) %>%
-  #     addCircles(lng = ~long, lat = ~lat,
-  #                radius = ~N/50)
-  #   
-  # })
+  observe({
+    
+    if (input$checkvehicle == 'Bike') {
+      map_data <- bike_map_subset() #NYCbike_map
+      color_circle <- 'darkorange'
+      sizeT <- 5
+      
+      
+      
+    }
+    
+    
+    if (input$checkvehicle == 'Green Taxi') {
+      map_data <- taxisG_map_subset() #taxisG_map
+      color_circle <- 'green'
+      sizeT <- 5
+
+      
+    }
+
+
+
+    if (nrow(map_data) > 1){
+    
+    leafletProxy('maptaxig', data = map_data) %>%
+      addCircles(lng = ~long, lat = ~lat,
+                 radius = ~N/sizeT, label = ~fullLabel, color = color_circle)
+    } else{
+      leafletProxy('maptaxig', data = taxisG_map) %>%
+        addControl('No Data available For that selection of vehicle, year and month', 'topleft')
+      
+    }
+
+  })
   
   
-  #^^^^^^^^^^^^^^^^^^^^^
-  # First Table --------
-  #^^^^^^^^^^^^^^^^^^^^^
   
-  # output$InitialVsFinalTable<- renderDT({
-  #   
-  #  
-  #   
-  # },
-  # rownames = FALSE,
-  # extensions = 'Buttons',
-  # options = list(
-  #   pageLength = 200, # how many entries to show
-  #   scrollX = TRUE,
-  #   dom = 'Bfrtip', # to allow the csv/excel buttons. Bfrtip: button filtering processing table information pagination
-  #   buttons = c('copy', 'excel', 'pdf')
-  # )
-  # )
+
+   output$CoordenateMiss <- renderUI({
+
+    
+    
+    if (input$actionhelp %% 2){
+      
+      output$plot_test <- renderPlot({
+        
+        if (input$checkvehicle == 'Green Taxi'){ NAdata <- NATaxiGmap_long
+        
+        
+        ggplot(data = NAdata, aes(x = year, y = N, fill = type)) +
+          geom_bar(stat = 'identity')+
+          scale_fill_manual(values = c('Pick Up' = 'darkgreen',
+                                       'Drop Off' = 'darkorange'),
+                            name = 'Ride Type')+
+          scale_y_continuous(label = comma)+
+          theme_bw()+
+          theme(plot.background = element_blank(), 
+                axis.title = element_blank(),
+                panel.border = element_blank(),
+                axis.line.x.bottom = element_line(color = 'darkgrey'),
+                axis.line.y.left = element_line(color = 'darkgrey'),
+                panel.grid = element_blank(),
+                axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+                axis.ticks = element_blank(),
+                legend.position = 'right',
+                legend.direction = 'vertical') 
+        } else { NAdata <- NABikeMap_long
+        
+        ggplot()+
+          ggtitle(paste0('There is a total of ', NAdata$N[1], ' records without year or location information for the bike data'))
+        
+        }
+        
+        
+      })
+      
+      plotOutput("plot_test")
+      
+      
+      
+    } else{
+      return()
+    }
+    
+  
+    
+     
+      
+  })
+  
   
   
 }) #server

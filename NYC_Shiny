@@ -1,6 +1,7 @@
 
 library(shiny)
 library(shinydashboard)
+# library(shinydashboardPlus)
 library(ggplot2)
 library(plotly)
 library(data.table)
@@ -63,13 +64,18 @@ ui <- fluidPage(
     
                           .skin-blue .main-header .logo {background-color:#5AAA66; width:150%;  font-size:30px; display:contents; font-weight:bold; }
                           .skin-blue .main-header .logo:hover {background-color:#5AAA66;}
-                          .skin-blue .main-header .navbar {display:none }
+                           # .skin-blue .main-header .navbar {display:none }
+.skin-blue .main-header .navbar {background-color:#478851; margin-right:0px, margin-top:-75px; position:absolute; display:inline; height:75px; right:0px; 
+margin-left:0px; padding:0px}
+.skin-blue .main-header .navbar .sidebar-toggle {color:#fff}
+.skin-blue .main-header .navbar .sidebar-toggle:hover {color:#F39B37; background-color:#478851}
+
 
                           .skin-blue .wrapper {background-color:#5AAA66}
     
                           .skin-blue.sidebar-menu > li.active > a {color:#fff}
                           
-                          .box {background-color:#478851;}
+                          .box {background-color:#478851;margin:0}
                           .box-header .box-title {color: #fff}
                           
                          
@@ -80,8 +86,8 @@ ui <- fluidPage(
                           
                           .skin-blue .sidebar a {color:#fff; background:#478851}
                           .skin-blue .sidebar-menu > li > a {border-left:0px; background:#478851;
-border-top:3px;
-border-radius:3px;
+                                                             border-top:3px;
+                                                             border-radius:3px;
                           border-top-color:#F39B37;}
                           .skin-blue .sidebar-menu > li:hover > a {background:#FABB53}
                           
@@ -93,21 +99,30 @@ border-radius:3px;
                      ')
                   )),
   
-                  dashboardPage(skin='blue',
+                  dashboardPage(#skin='blue',
                     
                    
                     
                     # --------------------------- a) header --------------------------------------------       
-                    dashboardHeader(title = span(img(src="logo8.png", width = 250, height = 75), tags$b('New York City Commute')),
-                                    tags$li(tags$style(".main-header {max-height: 75}"),
-                                            tags$style(".main-header .logo {height: 75, width: 90px}"),
-                                            class = "dropdown")),   
+                     header = dashboardHeader(title = span(img(src="logo8.png", width = 250, height = 75), tags$b('New York City Commute')),
+                                     tags$li(
+                                             tags$a(img(src='GitHub2.PNG',
+                                                 width="50",height="35", padding = '0px'),
+                                                 href="https:///github.com/beaim19/NYC_commute//", target = "_blank"),
+                                             class = "dropdown",      
+                                             tags$style(".main-header {max-height: 75}"),
+                                             tags$style(".main-header .logo {height: 75, width: 90px}")
+
+                                             )),
+      
                     
                     
                     # --------------------------- b) sidebar -------------------------------------------       
-                    dashboardSidebar(width = 250, #disable = TRUE,
+                    dashboardSidebar(width = 250, 
                       
                       tags$style(".tab-content {padding-top: 50px}"),
+                      
+                      
                       
                       sidebarMenu( id = 'sidebar', #for boomarking and restoring selected tabs http://shiny.rstudio.com/articles/bookmarking-state.html
                                    
@@ -116,7 +131,7 @@ border-radius:3px;
                                   menuItem('Graphs', tabName = 'graphs')
                       ),
                       
-                     
+                    
                       
                       fluidRow(
                         
@@ -202,7 +217,7 @@ border-radius:3px;
                                       #height = 100,
                                       radioButtons(inputId = 'checktimeday',
                                                    label = 'Select Time of the Day',
-                                                   inline = TRUE,
+                                                   #inline = TRUE,
                                                    choices = c('Morning', 'Afternoon', 'Evening', 'Night'),
                                                    selected = 'Morning')),
                                   box(width = 3,
@@ -247,7 +262,7 @@ border-radius:3px;
 server <- shinyServer(function(input, output) {
   
   all_data_subset <- reactive({
-   # req(input$checkvehicle) # ensure availablity of value before proceeding
+
     req(input$checkyear)
 
     

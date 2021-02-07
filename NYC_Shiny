@@ -41,7 +41,7 @@ ui <- fluidPage(
   
   
                  # HTML - to change the css of the page ------------------------
-                 tags$style(".main-sidebar {padding-top: 75px}"),
+                 tags$style(".main-sidebar {top: 85px}"),
   
                  tags$head(tags$style(
                      HTML('
@@ -51,7 +51,8 @@ ui <- fluidPage(
 
                            }
                           
-                          .tab-content > .active > .body {color: #fff}
+                          .tab-content > .active > .body {color: #fff; }
+.tab-content > .active {padding-top:20px}
                           .container-fluid {background-color: #5AAA66}
                           .content-wrapper {background-color: #5AAA66; color: #fff}
                          
@@ -60,17 +61,23 @@ ui <- fluidPage(
                           .box.box-primary {border-top-color:#F39B37}
                           .box {border-top-color:#F39B37}
 
-                          .main-header {max-height:75px; background-color:#478851; height:100%; position:absolute; width:100%}
+                          .main-header {max-height:75px; background-color:#478851; height:100%; position:absolute; width:100%; }
     
                           .skin-blue .main-header .logo {background-color:#5AAA66; width:150%;  font-size:30px; display:contents; font-weight:bold; }
-                          .skin-blue .main-header .logo:hover {background-color:#5AAA66;}
+                          .skin-blue .main-header .logo:hover {background-color:#5AAA66;z-index:-1}
                            # .skin-blue .main-header .navbar {display:none }
 .skin-blue .main-header .navbar {background-color:#478851; margin-right:0px, margin-top:-75px; position:absolute; display:inline; height:75px; right:0px; 
-margin-left:0px; padding:0px}
+margin-left:0px; padding:0px; width:10%;}
 .skin-blue .main-header .navbar .sidebar-toggle {color:#fff}
 .skin-blue .main-header .navbar .sidebar-toggle:hover {color:#F39B37; background-color:#478851}
 
 
+@media only screen and (max-width:900px) {
+.main-sidebar{margin-top:30px}
+
+}
+
+.wrapper {overflow-y: hidden;}
                           .skin-blue .wrapper {background-color:#5AAA66}
     
                           .skin-blue.sidebar-menu > li.active > a {color:#fff}
@@ -78,6 +85,7 @@ margin-left:0px; padding:0px}
                           .box {background-color:#478851;margin:0}
                           .box-header .box-title {color: #fff}
                           
+aside#sidebarCollapsed.main-sidebar.shiny-bound-input{padding-top:0px; z-index:10}
                          
                           .skin-blue .sidebar-menu li.active > a {
                           background: #F39B37;
@@ -120,7 +128,7 @@ margin-left:0px; padding:0px}
                     # --------------------------- b) sidebar -------------------------------------------       
                     dashboardSidebar(width = 250, 
                       
-                      tags$style(".tab-content {padding-top: 50px}"),
+                      tags$style(".tab-content {padding-top:50px}"),
                       
                       
                       
@@ -161,8 +169,8 @@ margin-left:0px; padding:0px}
                       
                       
                       
-                      fluidRow(width = 3,
-                               menuItem('Graphs2', tabName = 'graphs2')),
+                      # fluidRow(width = 3,
+                      #          menuItem('Graphs2', tabName = 'graphs2')),
                       
 
                       # Tabs #
@@ -175,7 +183,7 @@ margin-left:0px; padding:0px}
                               fluidRow(
 
                                   
-                                  box(width = 8, # rows have a grid of 12
+                                  box(width = 12, # rows have a grid of 12
                                       title = 'Total Rides',
                                       status='primary',
                                       plotOutput('totalRidesMonth',
@@ -186,7 +194,7 @@ margin-left:0px; padding:0px}
                               fluidRow(
                                 
                                 box(width = 6,
-                                    title = 'Bike Rides WHEN',
+                                    title = 'Bike Rides by time of the day/week',
                                     plotOutput('bikesByTime',
                                                height = 350),
                                     radioButtons(inputId = 'checktime',
@@ -194,7 +202,7 @@ margin-left:0px; padding:0px}
                                                  choices = c('Time of the day', 'Weekday/Weekend'),
                                                  selected = 'Time of the day')),
                                 box(width = 6,
-                                    title = 'Green Taxi Rides WHEN',
+                                    title = 'Green Taxi Rides by time of the day/week',
                                     plotOutput('GtaxiByTime'))
                                 
                               )
@@ -442,7 +450,7 @@ server <- shinyServer(function(input, output) {
       theme_bw()+
       theme(plot.background = element_blank(), 
             axis.ticks = element_blank(),
-            axis.title.x = element_blank(),
+            axis.title = element_blank(),
             panel.border = element_blank(),
             axis.line.x.bottom = element_line(color = 'darkgrey'),
             axis.line.y.left = element_line(color = 'darkgrey'),

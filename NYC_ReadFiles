@@ -1,98 +1,197 @@
 
 
-# install.packages('unixtools', repos = 'http://www.rforge.net/') 
-# unixtools::set.tempdir("D:\\")
-# 
-# write("TMP = 'D:\\'", file=file.path(Sys.getenv('R_USER'), '.Renviron'))
-
-library(data.table)
-library(dplyr)
-library(ggplot2)
-library(lubridate)
-
 setwd('D:\\bigquery\\SFbikes')
 
+library(data.table)
+library(leaflet)
+library(raster)
+library(openxlsx)
+
+rm(list = ls())
 
 
-# Bike data ======================================================
-nyc_bikes <- data.table(readRDS('NY_BikeTrips.RDS'))
+# 1 - BIG QUERY download data =======================================================
+library(readr)
+library(bigrquery)
+# with dbConnect
+library(DBI)
 
-head(nyc_bikes)
+# Authentification: open browser to connect with your acount
+bq_auth()
 
 
 
+# . 1.a. Green Taxi -----------------------------------------------------------------
 
-# subset the data, to explore and create what I want 
-# this way you make faster progress from the befinning
-# and once you have a model you are happy with, you 
-# apply the mdoel to the entire data set
+# . . Trip data ----
+my_billing <- 'bikessf-291307'
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bikessf",
+  dataset = "tlc_green_trips_2014",
+  billing = my_billing
+)
 
-set.seed(12)
+NYCgreen_taxi <- dbGetQuery(
+  con, 
+  "SELECT vendor_id, pickup_datetime, dropoff_datetime, pickup_longitude,
+          dropoff_longitude, pickup_latitude, dropoff_latitude
+  FROM `bigquery-public-data.new_york_taxi_trips.tlc_green_trips_2014`"
+)
 
-system.time({
-  sampleNYCbikes <- nyc_bikes %>%
-  filter(row_number() %in% sample(1:nrow(nyc_bikes), 10000, replace = FALSE))
+setDT(NYCgreen_taxi)
+saveRDS(NYCgreen_taxi, 'NYCgreen_taxi.RDS')
+
+
+# . . ID locators ----
+# Last year of data does not have lat and long for pickup/dropoff
+# but the locator ID 
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bikessf",
+  dataset = "taxi_zone_geom",
+  billing = my_billing
+)
+
+NYCgreen_taxi_zones <- dbGetQuery(
+  con, 
+  "SELECT zone_id, zone_name, zone_geom
+  FROM `bigquery-public-data.new_york_taxi_trips.taxi_zone_geom`"
+)
+
+saveRDS(NYCgreen_taxi_zones, 'NYCgreen_taxi_zones.RDS')
+
+
+
+# . 1.b. Yellow Taxi ----------------------------------------------------------------
+# yellow taxi is a big data base, need to do it in chunks
+my_billing <- 'bikessf-291307'
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bikessf",
+  dataset = "tlc_yellow_trips_2015",
+  billing = my_billing
+)
+
+options(digits = 10)
+
+for (i in seq(50000001, 60000001, 5000000)){
   
-})
-
-system.time({
-  sampleNYCbikes2 <- nyc_bikes[sample(1:nrow(nyc_bikes), 10000, replace = FALSE)]
+  bq_auth()
   
-})
+  tempfile(pattern = 'bikenyc', tmpdir = tempdir())
+  print(i)
+  
+  file_downloaded <- dbGetQuery(
+    con, 
+    sprintf(paste0("SELECT *
+                   FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2015`
+                   LIMIT ", i+4999999, " OFFSET ", i)),
+    options(scipen = 20)
+    )
+  
+  setDT(file_downloaded)
+  saveRDS(file_downloaded, paste0('NY_TaxTrips_Y2015_', i, '.RDS'))
+  print(i)
+  file.remove(list.files(tempfile(), full.names = TRUE, pattern = '^RTm'))
+}
 
 
-table(lubridate::year(sampleNYCbikes2$starttime))
-
-ggplot(data = sampleNYCbikes2, aes(x = starttime))+
-  geom_bar(stat = 'count')
-
-# work with the sample _____ or
-# sampleNYCbikes3 <- sampleNYCbikes2[,
-#                                    .N,
-#                                    by = .(month(starttime), year(starttime))]
-
-# __________ with the whole aggregated
-
-# By month ____________________________________________________
-sampleNYCbikes3 <- nyc_bikes[,
-                             .N,
-                             by = .(month(starttime), year(starttime))]
-
-sampleNYCbikes3[!is.na(month),':='
-                (month2 = factor(month.name[month],
-                                    labels = month.name,
-                                    levels = month.name))]
-
-ggplot(data = sampleNYCbikes3[!is.na(year)], aes(x = month2, y = N))+
-  geom_bar(stat = 'identity') +
-  facet_wrap(~year)+
-  theme(axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
-        axis.ticks = element_blank())
+file_downloaded <- dbGetQuery(
+  con, 
+  sprintf(paste0("SELECT *
+                 FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2015`
+                 LIMIT 75000000")),
+  options(scipen = 20))
 
 
-# By time of the day ____________________________________________
 
-# Classiffy the ride in morning/afternoon/evening/night and
-# weekeday or weekend/holiday
+setDT(file_downloaded)
+saveRDS(file_downloaded, 'NY_TaxTrips_Y2015_1_75000000.RDS')
 
-# Time of the day
-nyc_bikes[hour(starttime) >= 6 & hour(starttime) < 12,
-          TimeDay := 'Morning'][hour(starttime) >= 12 & hour(starttime) < 16,
-                                TimeDay := 'Afternoon'][hour(starttime) >= 16 & hour(starttime) < 20,
-                                                         TimeDay := 'Evening'][is.na(TimeDay),
-                                                                               TimeDay := 'Night']
 
-# Weekday/Holiday
+
+
+# . 1.c. Public Bikes ---------------------------------------------------------------
+
+# . . Trips ----
+my_billing <- 'bikessf-291307'
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bikessf",
+  dataset = "citibike_trips",
+  billing = my_billing
+)
+
+NYCgreen_taxi <- dbGetQuery(
+  con, 
+  "SELECT starttime, stoptime, start_station_id, start_station_latitude, start_station_longitude,
+          end_station_id, end_station_latitude, end_station_longitude, usertype, gender
+  FROM `bigquery-public-data.new_york_citibike.citibike_trips`"
+)
+
+setDT(NYCbikes)
+saveRDS(NYCbikes, 'NY_BikeTrips.RDS')
+
+
+# . . Stations -----
+my_billing <- 'bikessf-291307'
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bikessf",
+  dataset = "citibike_stations",
+  billing = my_billing
+)
+
+NYCbike_stations <- dbGetQuery(
+  con, 
+  "SELECT station_id, latitude, longitude, name
+  FROM `bigquery-public-data.new_york_citibike.citibike_stations`"
+)
+
+setDT(NYCbike_stations)
+saveRDS(NYCbike_stations, 'NYCbike_stations.RDS')
+
+
+# 2 - MANAGE DATA =============================================================
+
+# . 2.a. Green Taxi ----------------------------------------------------------
+
+
+# Read Data ________________________________________________
+YEAR <- 2018
+transp_data <- data.table(readRDS(paste0('NY_TaxTrips_G', YEAR, '.RDS')))
+
+transp_data[,
+            yearfile := YEAR]
+
+
+# Create the time variables ________________________________
+
+# Weekday ~~~~~~~~~~~~~~
+myweekdays <- c('Sunday', 'Monday', 'Tuesday',
+                'Wednesday', 'Thursday', 'Friday',
+                'Saturday')
+transp_data[,
+            WeekDay := myweekdays[wday(pickup_datetime)]]
+
+
+# Time of the day ~~~~~~~~~~~~~~~~~~~~
+transp_data[hour(pickup_datetime) >= 6 & hour(pickup_datetime) < 12,
+            TimeDay := 'Morning'][hour(pickup_datetime) >= 12 & hour(pickup_datetime) < 16,
+                                  TimeDay := 'Afternoon'][hour(pickup_datetime) >= 16 & hour(pickup_datetime) < 20,
+                                                          TimeDay := 'Evening'][is.na(TimeDay),
+                                                                                TimeDay := 'Night']
+transp_data[hour(dropoff_datetime) >= 6 & hour(dropoff_datetime) < 12,
+            TimeDayDO := 'Morning'][hour(dropoff_datetime) >= 12 & hour(dropoff_datetime) < 16,
+                                    TimeDayDO := 'Afternoon'][hour(dropoff_datetime) >= 16 & hour(dropoff_datetime) < 20,
+                                                              TimeDayDO := 'Evening'][is.na(TimeDayDO),
+                                                                                      TimeDayDO := 'Night']
+
+
+# Holidays ~~~~~~~~~~~~~~
 library(timeDate)
-
-# Weekday
-nyc_bikes[,
-          WeekDay := wday(starttime, label = TRUE)]
-
-# Holiday
-# Create a vector of holidays on those years
-years <- as.list(unique(year(nyc_bikes$starttime)))
-
+years <- 2014:2018
 Easter <- lapply(years, function(x) holiday(x, Holiday = 'GoodFriday'))
 Thanksg <- lapply(years, function(x) holiday(x, Holiday = 'USThanksgivingDay'))
 BlackFriday <- lapply(Thanksg, function(x) x+24*60*60)
@@ -111,16 +210,421 @@ holidays <- c(Easter, Thanksg,BlackFriday,
               NYday, ChristmasEve,
               IndpDay)
 
-
 holidays2 <- lapply(holidays, function(x) as(x, 'POSIXct', strict = TRUE))
 
 holidays3 <- do.call('c', holidays2)
 
 holidays4 <- holidays3[!is.na(holidays3)]
 
+transp_data[pickup_datetime %in% holidays4,
+            holiday := 1][is.na(holiday),
+                          holiday := 0]
+
+# Working day ~~~~~~~~~~~~~~~~~~~~~~
+transp_data[holiday == 1 | WeekDay %in% c('Saturday', 'Sunday'),
+            NoWorkDay := 'No Working Day'][is.na(NoWorkDay),
+                                           NoWorkDay := 'Working Day']
+
+
+
+# Location variables ________________________________________________________________________________
+
+# years 2014 and 2015 don't have the location ID, only the lat and long
+# of pick ups and drop offs. Need to bring in the zones for taxis to 
+# locate that data with the green taxi zones. 
+
+# package sf
+library(sf)
+
+map <- read_sf('geo_export_fcbf8f40-08a1-428c-bf1d-8c44512c5cb3.shp')
+st_crs(map)
+
+# Pick Up ___________
+# 2016/2017/2018
+transp_data[,
+            ID := as.character(rownames(transp_data))]
+
+# 2015/2014
+pnts_sf <- st_as_sf(transp_data, coords = c('pickup_longitude', 'pickup_latitude'), crs = st_crs(map))
+
+# year 2016 is missing some coordinates
+pnts_sf <- st_as_sf(transp_data[!is.na(pickup_longitude) & !is.na(pickup_latitude)], 
+                    coords = c('pickup_longitude', 'pickup_latitude'), crs = st_crs(map))
+
+# 2014/2015/2016
+intersection = as.integer(unlist(as.character(st_intersects(pnts_sf$geometry, map))))
+
+area = ifelse(is.na(intersection), '', as.numeric(map$location_i[intersection]))
+
+# 2015/2014
+transp_data2 <- cbind(transp_data,
+                      data.table(pickup_location_id = as.numeric(area)))
+
+# for 2016 ____________
+transp_data2 <- cbind(transp_data[!is.na(pickup_longitude) & !is.na(pickup_latitude)],
+                      data.table(pickup_location_id = as.numeric(area)))
+transp_dataNA <- transp_data[is.na(pickup_longitude) | is.na(pickup_latitude)]
+transp_dataNA[,
+              pickup_location_id := NA]
+transp_data2_bis <- rbind(transp_data2,
+                          transp_dataNA)
+saveRDS(transp_data2_bis, paste0(YEAR, 'pickup_map.RDS'))
+#________________________________________________
+
+saveRDS(transp_data2, paste0(YEAR, 'pickup_map.RDS'))
+
+
+# Drop off ___________________
+pnts_sfDO <- st_as_sf(transp_data, coords = c('dropoff_longitude', 'dropoff_latitude'), crs = st_crs(map))
+
+# year 2016 is missing some coordinates
+pnts_sfDO <- st_as_sf(transp_data[!is.na(dropoff_longitude) & !is.na(dropoff_latitude)], 
+                      coords = c('dropoff_longitude', 'dropoff_latitude'), crs = st_crs(map))
+
+
+intersectionDO = as.integer(unlist(as.character(st_intersects(pnts_sfDO$geometry, map))))
+
+areaDO = ifelse(is.na(intersectionDO), '', as.numeric(map$location_i[intersectionDO]))
+
+
+transp_data3 <- cbind(transp_data2, 
+                      data.table(dropoff_location_id = as.numeric(areaDO)))
+
+
+# for 2016 ____________
+transp_data3 <- cbind(transp_data[!is.na(dropoff_longitude) & !is.na(dropoff_latitude)],
+                      data.table(dropoff_location_id = as.numeric(areaDO)))
+transp_dataDONA <- transp_data[is.na(dropoff_longitude) | is.na(dropoff_latitude)]
+transp_dataDONA[,
+                dropoff_location_id := NA]
+transp_data3_bis <- rbind(transp_data3,
+                          transp_dataDONA)
+saveRDS(transp_data3_bis, paste0(YEAR, 'dropoff_map.RDS'))
+#________________________________________________
+
+# 2014/2015
+saveRDS(transp_data3, paste0(YEAR, 'pickup_dropoff_map.RDS'))
+
+
+# Long Files __________________________________________________________________________________
+
+#  Long files 2014-2015 data _______________
+
+# 2016
+read2016PU <- readRDS('2016pickup_map.RDS')
+read2016DO <- readRDS('2016dropoff_map.RDS')
+
+setnames(read2016PU, 'pickup_location_id', 'location_id')
+setnames(read2016DO, 'dropoff_location_id', 'location_id')
+
+read2016PU[,
+           type := 'PU']
+read2016DO[,
+           type := 'DO']
+
+transp_data3 <- rbind(read2016PU,
+                      read2016DO)
+
+#transp_data3 <- copy(transp_data3_bis)
+
+# 2015/2014 pick ups
+transp_data_grouped_PU <- transp_data3[,
+                                       .N,
+                                       by = .(pickup_location_id,
+                                              TimeDay,
+                                              NoWorkDay)]
+
+transp_data_grouped_PU[, ':='
+                       (type = 'Pick Up',
+                         year = YEAR)]
+setnames(transp_data_grouped_PU, c('pickup_location_id'), 'location_id')
+
+
+# 2016
+transp_data_grouped <- transp_data3[,
+                                    .N,
+                                    by = .(location_id,
+                                           TimeDay,
+                                           NoWorkDay,
+                                           type)]
+
+
+
+
+# 2015/2014 drop offs
+
+transp_data_grouped_DO <- transp_data3[,
+                                       .N,
+                                       by = .(dropoff_location_id,
+                                              TimeDayDO,
+                                              NoWorkDay)]
+transp_data_grouped_DO[, ':='
+                       (type = 'Drop Off',
+                         year = YEAR)]
+setnames(transp_data_grouped_DO, c('dropoff_location_id', 'TimeDayDO'), c('location_id', 'TimeDay'))
+
+transp_data_grouped <- rbind(transp_data_grouped_PU,
+                             transp_data_grouped_DO)
+
+
+# 2014/2015/2016
+saveRDS(transp_data_grouped, paste0('grouped_GTaxi_', YEAR, '.RDS'))
+
+
+
+
+# Long files 2017-2018 data _______________
+saveRDS(transp_data, paste0(YEAR, 'pickup_dropoff_map.RDS'))
+
+
+transp_data_grouped_PU <- transp_data[,
+                                      .N,
+                                      by = .(pickup_location_id,
+                                             TimeDay,
+                                             NoWorkDay)]
+
+transp_data_grouped_PU[, ':='
+                       (type = 'Pick Up',
+                         year = YEAR)]
+setnames(transp_data_grouped_PU, c('pickup_location_id'), 'location_id')
+
+
+
+transp_data_grouped_DO <- transp_data[,
+                                      .N,
+                                      by = .(dropoff_location_id,
+                                             TimeDayDO,
+                                             NoWorkDay)]
+transp_data_grouped_DO[, ':='
+                       (type = 'Drop Off',
+                         year = YEAR)]
+setnames(transp_data_grouped_DO, c('dropoff_location_id', 'TimeDayDO'), c('location_id', 'TimeDay'))
+
+transp_data_grouped <- rbind(transp_data_grouped_PU,
+                             transp_data_grouped_DO)
+
+saveRDS(transp_data_grouped, paste0('grouped_GTaxi_', YEAR, '.RDS'))
+
+
+
+# Put all years together
+GT2014 <- readRDS('grouped_GTaxi_2014.RDS')
+GT2015 <- readRDS('grouped_GTaxi_2015.RDS')
+GT2016 <- readRDS('grouped_GTaxi_2016.RDS')
+GT2017 <- readRDS('grouped_GTaxi_2017.RDS')
+GT2018 <- readRDS('grouped_GTaxi_2018.RDS')
+
+GT2014 <- readRDS('2014TaxiG_month_map.RDS')
+GT2015 <- readRDS('2015TaxiG_month_map.RDS')
+GT2016 <- readRDS('2016TaxiG_month_map.RDS')
+GT2017 <- readRDS('2017TaxiG_month_map.RDS')
+GT2018 <- readRDS('2018TaxiG_month_map.RDS')
+
+GT2014[,
+       year := 2014]
+GT2015[,
+       year := 2015]
+GT2017[,
+       year := 2017]
+GT2018[,
+       year := 2018]
+
+GT2016[,
+       year := 2016]
+GT2016[type == 'PU',
+       type := 'Pick Up']
+GT2016[type == 'DO',
+       type := 'Drop Off']
+GT2016[is.na(type)]
+
+
+head(GT2014)
+
+GgroupedtaxiALL <- rbind(GT2014,
+                         GT2015,
+                         GT2016,
+                         GT2017,
+                         GT2018)
+
+# need to add the coordinates of each location id
+# get the centroid of the polygons
+map$centroid <- st_centroid(map$geometry)
+
+nyc_taxi_zones <- data.table(location_id = map$location_i,
+                             centroid = map$centroid)
+
+nyc_taxi_zones[, ':='
+               (long = as.numeric(regmatches(centroid, regexpr('(-\\d*\\.\\d+)', centroid, perl = TRUE))),
+                 lat = as.numeric(trimws(regmatches(centroid, regexpr('(\\s\\d*\\.\\d+)', centroid, perl = TRUE)))))]
+
+GgroupedtaxiALL[,
+                location_id := as.numeric(location_id)]
+
+# map for taxi location ID, 56 and 103 have three different coordinates
+# all in the same area. Will select only one record for each
+nyc_taxi_zones2 <- nyc_taxi_zones[,
+                                  .SD[1],
+                                  by = .(location_id)]
+
+GgroupedtaxiALL2 <- merge(GgroupedtaxiALL,
+                          subset(nyc_taxi_zones2, select = c(location_id, long, lat)),
+                          by = 'location_id',
+                          all.x = TRUE)
+
+setnames(GgroupedtaxiALL2, 'lubridate', 'month')
+
+saveRDS(GgroupedtaxiALL2, 'grouped_Gtaxi_ALL_month.RDS')
+
+
+# an extra step later to add the name of the zone for hovering
+taxiG <- readRDS('grouped_Gtaxi_ALL_month.RDS')
+nyc_taxi_zonesID <- data.table(read.xlsx('taxi_zones.xlsx'))
+nyc_taxi_zonesID2 <- nyc_taxi_zonesID[,
+                                  .SD[1],
+                                  by = .(LocationID)]
+taxiG2 <- merge(taxiG,
+                subset(nyc_taxi_zonesID2, select = c(zone, LocationID)),
+                by.x = 'location_id',
+                by.y = 'LocationID',
+                all.x = TRUE)
+taxiG2[is.na(zone),
+       zone := 'Zone Name Unknown']
+
+taxiG2 <- taxiG2[complete.cases(lat) | 
+                           complete.cases(long),]
+
+taxiG2[,
+           fullLabel := paste0(zone,': ', N)]
+
+saveRDS(taxiG2, 'grouped_Gtaxi_ALL_complete_month.RDS')
+
+
+
+
+
+saveRDS(taxisG_map, 'grouped_Gtaxi_ALL_complete.RDS')
+
+
+
+
+# # an extra step later to add month of ride
+# taxiG2014 <- readRDS('2014pickup_dropoff_map.RDS')
+# taxiG2015 <- readRDS('2015pickup_dropoff_map.RDS')
+# taxiG2016PU <- readRDS('2016pickup_map.RDS')
+# taxiG2016DO <- readRDS('2016dropoff_map.RDS')
+# taxiG2017 <- readRDS('2017pickup_dropoff_map.RDS')
+# taxiG2018 <- readRDS('2018pickup_dropoff_map.RDS')
+# 
+# select_Variables <- c('pickup_datetime', 'dropoff_datetime',
+#                       'TimeDay', 'TimeDayDO', 'NoWorkDay',
+#                       'yearfile',
+#                       'pickup_location_id', 'dropoff_location_id')
+# long_map_T <- rbind(subset(taxiG2014, select = select_Variables),
+#                     subset(taxiG2015, select = select_Variables),
+#                     subset(taxiG2017, select = select_Variables),
+#                     subset(taxiG2018, select = select_Variables))
+# 
+# yearF <- 2016
+# 
+# taxi_ALL <- data.table()
+# for (yearF in c(2014:2015,2017:2018)){
+#   
+#   long_map_T_PU <- long_map_T[yearfile == yearF,
+#                             .N,
+#                             by = .(pickup_location_id,
+#                                    TimeDay,
+#                                    NoWorkDay,
+#                                    lubridate::month(pickup_datetime)
+#                                    )]
+#   long_map_T_PU[, ':='
+#                 (type = 'Pick Up')]
+#   setnames(long_map_T_PU, c('pickup_location_id'), 'location_id')
+#   
+#   long_map_T_DO <- long_map_T[yearfile == yearF,
+#                               .N,
+#                               by = .(dropoff_location_id,
+#                                      TimeDayDO,
+#                                      NoWorkDay,
+#                                      lubridate::month(pickup_datetime))]
+#   long_map_T_DO[, ':='
+#                 (type = 'Drop Off')]
+#   setnames(long_map_T_DO, c('dropoff_location_id', 'TimeDayDO'), 
+#            c('location_id', 'TimeDay'))
+#   
+#   transp_data_groupedY <- rbind(long_map_T_PU,
+#                                long_map_T_DO)
+#   
+#   taxi_ALL <- rbind(taxi_ALL, transp_data_groupedY)
+#   
+# }
+# 
+# saveRDS(transp_data_groupedY, 
+#         paste0(yearF, 'TaxiG_month_map.RDS'))
+
+
+
+
+# . 2.b. Yellow Taxi ----------------------------------------------------------
+# Don't have all the data yet
+
+
+# . 2.c. Public Bikes ---------------------------------------------------------
+
+nyc_bikes <- data.table(readRDS('NY_BikeTrips.RDS'))
+
+head(nyc_bikes)
+
+# get the raw data with missing location
+nyc_bikes[,
+          yearF := year(starttime)]
+NABikeMap_MISS <- nyc_bikes[is.na(start_station_longitude),
+                            .N,
+                            by = .(yearF)]
+
+
+# By month ____________________________________________________
+sampleNYCbikes3 <- nyc_bikes[,
+                             .N,
+                             by = .(month(starttime), year(starttime))]
+
+sampleNYCbikes3[!is.na(month),':='
+                (month2 = factor(month.name[month],
+                                 labels = month.name,
+                                 levels = month.name))]
+
+# By time of the day ____________________________________________
+
+# Classiffy the ride in morning/afternoon/evening/night and
+# weekeday or weekend/holiday
+
+# Time of the day
+nyc_bikes[hour(starttime) >= 6 & hour(starttime) < 12,
+          TimeDay := 'Morning'][hour(starttime) >= 12 & hour(starttime) < 16,
+                                TimeDay := 'Afternoon'][hour(starttime) >= 16 & hour(starttime) < 20,
+                                                        TimeDay := 'Evening'][is.na(TimeDay),
+                                                                              TimeDay := 'Night']
+
+
+# Weekday/Holiday
+library(timeDate)
+
+# Weekday
+myweekdays <- c('Sunday', 'Monday', 'Tuesday',
+                'Wednesday', 'Thursday', 'Friday',
+                'Saturday')
+nyc_bikes[,
+          WeekDay := myweekdays[wday(starttime)]]
+
+
+
 nyc_bikes[starttime %in% holidays4,
           holiday := 1][is.na(holiday),
                         holiday := 0]
+
+# Working day
+nyc_bikes[holiday == 1 | WeekDay %in% c('Saturday', 'Sunday'),
+          NoWorkDay := 'No Working Day'][is.na(NoWorkDay),
+                                         NoWorkDay := 'Working Day']
 
 # Aggregate by Time of the day, Weekday, and holiday
 nyc_bikes_byTime <- nyc_bikes[,
@@ -134,179 +638,108 @@ nyc_bikes_byTime[,
                                   levels = month.name)]
 
 
+# Map
+nyc_bikes_MapPU <- nyc_bikes[,
+                             .N,
+                             by = .(year(starttime), TimeDay,
+                                    holiday, NoWorkDay,
+                                    start_station_id, gender, month(starttime))]
 
+nyc_bikes_MapDO <- nyc_bikes[,
+                             .N,
+                             by = .(year(starttime), TimeDay,
+                                    holiday, NoWorkDay,
+                                    end_station_id, gender, month(starttime))]
 
-# plots
+nyc_bikes_MapPU[, ':='
+                (type = 'Pick Up',
+                  station_id = start_station_id,
+                  start_station_id = NULL)]
 
-# Time Day
+nyc_bikes_MapDO[, ':='
+                (type = 'Drop Off',
+                  station_id = end_station_id,
+                  end_station_id = NULL)]
 
-ggplot(data = nyc_bikes_byTime[!is.na(month),
-                               .(N = sum(N)),
-                               by = .(year, month2, TimeDay)], aes(x = month2, y = N, 
-                                                                   fill = TimeDay)) +
-  geom_bar(stat = 'identity') +
-  facet_wrap(~year) +
-  theme(axis.text = element_text(angle = 90))
+nyc_bikes_Map <- rbind(nyc_bikes_MapPU,
+                       nyc_bikes_MapDO)
 
-# Day of the week
-nyc_bikes_byTime[holiday == 1 | WeekDay %in% c('Sat', 'Sun'),
-                 NoWorkDay := 'No Working Day'][is.na(NoWorkDay),
-                                                NoWorkDay := 'Working Day']
+# need to add the long and lat of the stations (from bigquery)
 
-ggplot(data = nyc_bikes_byTime[!is.na(month),
-                               .(N = sum(N)),
-                               by = .(year, month2, NoWorkDay)], aes(x = month2, y = N, 
-                                                                   fill = NoWorkDay)) +
-  geom_bar(stat = 'identity') +
-  facet_wrap(~year) +
-  theme(axis.text = element_text(angle = 90))
+coord_stations <- readRDS('NYCbike_stations.RDS') # this does not have all the stations. 
+my_st <- readRDS('my_Stations_id.RDS') # I saved this file with the id from the big file
 
+missingStations <- setdiff(my_st$station_id, coord_stations$station_id)
 
-saveRDS(nyc_bikes_byTime, 'NYC_Bikes_Aggr_Time.RDS')
+setnames(my_st, c('lat', 'long'), c('latitude', 'longitude'))
 
+coord_stations2 <- rbind(coord_stations, 
+                         my_st[station_id %in% missingStations], fill = TRUE)
+coord_stations2[is.na(name),
+                name := 'Name unknown']
 
+# for those locations with more than one set of coordinates
+coord_stations3 <- coord_stations2[, 
+                                   .SD[1],
+                                   by = .(station_id)]
 
-# Green Taxi Data =============================
+nyc_bikes_Map2 <- merge(nyc_bikes_Map,
+                        coord_stations3,
+                        by = 'station_id',
+                        all.x = TRUE)
 
-taxiG <- list()
-for(year_taxi in 2014:2018){
-  
-  taxi_file <- data.table(readRDS(paste0('NY_TaxTrips_G', year_taxi, '.RDS')))
-  
-  # Time of the day
-  taxi_file[hour(pickup_datetime) >= 6 & hour(pickup_datetime) < 12,
-            TimeDay := 'Morning'][hour(pickup_datetime) >= 12 & hour(pickup_datetime) < 16,
-                                  TimeDay := 'Afternoon'][hour(pickup_datetime) >= 16 & hour(pickup_datetime) < 20,
-                                                          TimeDay := 'Evening'][is.na(TimeDay),
-                                                                                TimeDay := 'Night']
-  # Holidays
-  taxi_file[pickup_datetime %in% holidays4,
-            holiday := 1][is.na(holiday),
-                          holiday := 0]
-  
-  # Weekday
-  taxi_file[,
-            WeekDay := wday(pickup_datetime, label = TRUE)]
-  
-  # Working day
-  taxi_file[holiday == 1 | WeekDay %in% c('Sat', 'Sun'),
-            NoWorkDay := 'No Working Day'][is.na(NoWorkDay),
-                                           NoWorkDay := 'Working Day']
-  
-  
-  #  ____ agregate year-month
-  taxi_file2 <- taxi_file[,
-                          .N,
-                          by = .(year(pickup_datetime), month(pickup_datetime),
-                                 TimeDay, NoWorkDay)]
-  
-  taxiG[[which(c(2014:2018) == year_taxi)]] <- taxi_file2
-  
-  print(year_taxi)
-  
-}
+setnames(nyc_bikes_Map2,
+         c('station_id', 'longitude', 'latitude'),
+         c('location_id', 'long', 'lat'))
 
-taxiG_2 <- Reduce(function(a, b) rbind(a, b, fill = TRUE), taxiG)
- 
-taxiG_3 <- copy(taxiG_2)
-# taxiG_3 <- taxiG_2[,
-#                    .N,
-#                    by = .(year(pickup_datetime), month(pickup_datetime))]
+saveRDS(nyc_bikes_Map2, 'NYCbike_Map.RDS') # saved also as NoGender when doing it without gender grouping
 
-taxiG_3[!is.na(month),':='
-        (month2 = factor(month.name[month],
-                         labels = month.name,
-                         levels = month.name))]
+# done later, to add the zone
+bikeNYC <- readRDS('NYCbike_Map.RDS')
+bikeNYC2 <- merge(bikeNYC,
+                  subset(coord_stations, select = c(station_id, name)),
+                  by.x = 'location_id',
+                  by.y = 'station_id',
+                  all.x = TRUE)
+bikeNYC2[is.na(name),
+         name := 'Zone Name Unkown']
+setnames(bikeNYC2, 'name', 'zone')
 
+NYCbike_map <- bikeNYC2[complete.cases(lat) | 
+                             complete.cases(long),]
+NYCbike_map[,
+            fullLabel := paste0(zone,': ', N)]
 
-saveRDS(taxiG_3, 'TaxiG_time.RDS')
+saveRDS(NYCbike_map, 'NYCbike_Map.RDS') # save also as no Gender when doing it without gender grouping
 
+NABikeMap <- data.table(readRDS('NYCbike_Map.RDS'))
+
+my_st <- readRDS('my_Stations_id.RDS')
+
+my_st[, .N, by = .(station_id)][N>1]
+
+# some stations have more than one coordinate, chosing just one for now
+my_st2 <- my_st[,
+                .SD[1],
+                by = .(station_id)]
 
 
 
-# save the aggregated files
-saveRDS(sampleNYCbikes3[!is.na(year)], 'Aggr_bikes.RDS')
-saveRDS(taxiG_3[N >= 500], 'Agg_Gtaxis.RDS')
-
-sampleNYCbikes3[,
-                vehicle := 'bike']
-taxiG_3[,
-        vehicle := 'taxiG']
-
-all_data <- rbind(sampleNYCbikes3[!is.na(year)],
-                  taxiG_3[N >= 500])
-#saveRDS(all_data, 'Bike_TaxiG.RDS')
-
-sampleNYCbikes3 <- readRDS('Aggr_bikes.RDS')
-taxiG_3 <- readRDS('Agg_Gtaxis.RDS')
+miss_st <- merge(NABikeMap[is.na(long)],
+                 my_st2,
+                 by.x = 'location_id',
+                 by.y = 'station_id',
+                 all.x = TRUE)
+miss_st[, 
+        c('lat.x', 'long.x') := NULL ]
+setnames(miss_st, c('lat.y', 'long.y'), c('lat', 'long'))
 
 
-ggplot(data = sampleNYCbikes3[!is.na(year)], aes(x = month2, y = N))+
-  geom_bar(stat = 'identity') +
-  geom_bar(data = taxiG_3[(year %in% c(2014:2018))], aes(x = month2, y = N), stat = 'identity', fill = 'green', alpha = 0.5)+
-  facet_wrap(~year)+
-  theme(plot.background = element_blank(), 
-        axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
-        axis.ticks = element_blank())
+all_bike <- rbind(NABikeMap[!is.na(long)],
+                  miss_st)
 
-ggplot(data = all_data[vehicle == 'bike'], aes(x = month2, y = N))+
-  geom_bar(stat = 'identity', fill = 'darkorange') +
-  geom_bar(data = all_data[vehicle == 'taxiG'], aes(x = month2, y = N), stat = 'identity', fill = 'green', alpha = 0.5)+
-  facet_wrap(~year)+
-  scale_fill_manual(name = 'Vehicle', labels = list('Bike' = 'darkorange',
-                                                    'Green Taxi' = 'green')) +
-  theme(plot.background = element_blank(), 
-        axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
-        axis.ticks = element_blank(),
-        legend.position = 'bottom')
-
-
-ggplot(data = all_data, aes(x = month2, y = N, fill = vehicle, alpha = 0.5))+
-  geom_bar(stat = 'identity', position = position_dodge(width = 0), width = 0.9) +
-  guides(alpha = FALSE) +
-  #geom_bar(data = all_data[vehicle == 'taxiG'], aes(x = month2, y = N), stat = 'identity', fill = 'green', alpha = 0.5)+
-  facet_wrap(~year)+
-  scale_fill_manual(name = 'Vehicle', 
-                    values = c('bike' = 'darkorange',
-                               'taxiG' = 'green'),
-                    labels = c('bike' = 'Bikes',
-                               'taxiG' = 'Green Taxi')) +
-  theme(plot.background = element_blank(), 
-        axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
-        axis.ticks = element_blank(),
-        legend.position = 'right',
-        legend.direction = 'vertical')
-
-
-
-# Visualizations
-# 1- Times of the day: do they change along the year?
-# How is it between weekdays and weekends?
-# 2 - Map with pick up stations/drop off stations
-# for taxis need to group them by zones
-# For Bikes and Taxis
-# How do they change along the year?
-# How do they change from weekdays to weekends?
-
-
-# 2 - MAPPING ==================================
-library(leaflet)
-
-# working for now with only one year of data
-
-Gtaxi_2015 <- data.table(readRDS(paste0('NY_TaxTrips_G2015.RDS')))
-
-
-Gtaxi_2015_start <- subset(Gtaxi_2015,
-                           select = c(pickup_datetime, 
-                                      pickup_longitude, pickup_latitude,
-                                      trip_distance))
-
-
-setnames(Gtaxi_2015_start, c('pickup_longitude', 'pickup_latitude'),
-         c('longitude', 'latitude'))
-
-leaflet(Gtaxi_2015_start) %>% addCircles()
-
-
+all_bike[is.na(name),
+         name := 'Unknown Name']
+saveRDS(all_bike, 
+        'NYCbike_Map_all_stations.RDS')
 

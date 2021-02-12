@@ -109,7 +109,7 @@ aside#sidebarCollapsed.main-sidebar.shiny-bound-input{padding-top:0px; z-index:1
                      ')
                   )),
   
-                  dashboardPage(#skin='blue',
+                  dashboardPage(
                     
                    
                     
@@ -169,10 +169,6 @@ aside#sidebarCollapsed.main-sidebar.shiny-bound-input{padding-top:0px; z-index:1
                     # --------------------------- c) body ----------------------------------------------
                     dashboardBody(
                       
-                      
-                      
-                      # fluidRow(width = 3,
-                      #          menuItem('Graphs2', tabName = 'graphs2')),
                       
 
                       # Tabs #

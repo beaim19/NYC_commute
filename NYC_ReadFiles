@@ -63,56 +63,7 @@ saveRDS(NYCgreen_taxi_zones, 'NYCgreen_taxi_zones.RDS')
 
 
 
-# . 1.b. Yellow Taxi ----------------------------------------------------------------
-# yellow taxi is a big data base, need to do it in chunks
-my_billing <- 'bikessf-291307'
-con <- dbConnect(
-  bigrquery::bigquery(),
-  project = "bikessf",
-  dataset = "tlc_yellow_trips_2015",
-  billing = my_billing
-)
-
-options(digits = 10)
-
-for (i in seq(50000001, 60000001, 5000000)){
-  
-  bq_auth()
-  
-  tempfile(pattern = 'bikenyc', tmpdir = tempdir())
-  print(i)
-  
-  file_downloaded <- dbGetQuery(
-    con, 
-    sprintf(paste0("SELECT *
-                   FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2015`
-                   LIMIT ", i+4999999, " OFFSET ", i)),
-    options(scipen = 20)
-    )
-  
-  setDT(file_downloaded)
-  saveRDS(file_downloaded, paste0('NY_TaxTrips_Y2015_', i, '.RDS'))
-  print(i)
-  file.remove(list.files(tempfile(), full.names = TRUE, pattern = '^RTm'))
-}
-
-
-file_downloaded <- dbGetQuery(
-  con, 
-  sprintf(paste0("SELECT *
-                 FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2015`
-                 LIMIT 75000000")),
-  options(scipen = 20))
-
-
-
-setDT(file_downloaded)
-saveRDS(file_downloaded, 'NY_TaxTrips_Y2015_1_75000000.RDS')
-
-
-
-
-# . 1.c. Public Bikes ---------------------------------------------------------------
+# . 1.b. Public Bikes ---------------------------------------------------------------
 
 # . . Trips ----
 my_billing <- 'bikessf-291307'
@@ -381,7 +332,8 @@ transp_data_grouped_PU <- transp_data[,
                                       .N,
                                       by = .(pickup_location_id,
                                              TimeDay,
-                                             NoWorkDay)]
+                                             NoWorkDay,
+                                             lubridate::month(pickup_datetime))]
 
 transp_data_grouped_PU[, ':='
                        (type = 'Pick Up',
@@ -390,11 +342,12 @@ setnames(transp_data_grouped_PU, c('pickup_location_id'), 'location_id')
 
 
 
-transp_data_grouped_DO <- transp_data[,
+transp_data_grouped_DO <- jan2018[,
                                       .N,
                                       by = .(dropoff_location_id,
                                              TimeDayDO,
-                                             NoWorkDay)]
+                                             NoWorkDay,
+                                             lubridate::month(dropoff_datetime))]
 transp_data_grouped_DO[, ':='
                        (type = 'Drop Off',
                          year = YEAR)]
@@ -500,75 +453,11 @@ saveRDS(taxiG2, 'grouped_Gtaxi_ALL_complete_month.RDS')
 
 
 
-
-
 saveRDS(taxisG_map, 'grouped_Gtaxi_ALL_complete.RDS')
 
 
 
-
-# # an extra step later to add month of ride
-# taxiG2014 <- readRDS('2014pickup_dropoff_map.RDS')
-# taxiG2015 <- readRDS('2015pickup_dropoff_map.RDS')
-# taxiG2016PU <- readRDS('2016pickup_map.RDS')
-# taxiG2016DO <- readRDS('2016dropoff_map.RDS')
-# taxiG2017 <- readRDS('2017pickup_dropoff_map.RDS')
-# taxiG2018 <- readRDS('2018pickup_dropoff_map.RDS')
-# 
-# select_Variables <- c('pickup_datetime', 'dropoff_datetime',
-#                       'TimeDay', 'TimeDayDO', 'NoWorkDay',
-#                       'yearfile',
-#                       'pickup_location_id', 'dropoff_location_id')
-# long_map_T <- rbind(subset(taxiG2014, select = select_Variables),
-#                     subset(taxiG2015, select = select_Variables),
-#                     subset(taxiG2017, select = select_Variables),
-#                     subset(taxiG2018, select = select_Variables))
-# 
-# yearF <- 2016
-# 
-# taxi_ALL <- data.table()
-# for (yearF in c(2014:2015,2017:2018)){
-#   
-#   long_map_T_PU <- long_map_T[yearfile == yearF,
-#                             .N,
-#                             by = .(pickup_location_id,
-#                                    TimeDay,
-#                                    NoWorkDay,
-#                                    lubridate::month(pickup_datetime)
-#                                    )]
-#   long_map_T_PU[, ':='
-#                 (type = 'Pick Up')]
-#   setnames(long_map_T_PU, c('pickup_location_id'), 'location_id')
-#   
-#   long_map_T_DO <- long_map_T[yearfile == yearF,
-#                               .N,
-#                               by = .(dropoff_location_id,
-#                                      TimeDayDO,
-#                                      NoWorkDay,
-#                                      lubridate::month(pickup_datetime))]
-#   long_map_T_DO[, ':='
-#                 (type = 'Drop Off')]
-#   setnames(long_map_T_DO, c('dropoff_location_id', 'TimeDayDO'), 
-#            c('location_id', 'TimeDay'))
-#   
-#   transp_data_groupedY <- rbind(long_map_T_PU,
-#                                long_map_T_DO)
-#   
-#   taxi_ALL <- rbind(taxi_ALL, transp_data_groupedY)
-#   
-# }
-# 
-# saveRDS(transp_data_groupedY, 
-#         paste0(yearF, 'TaxiG_month_map.RDS'))
-
-
-
-
-# . 2.b. Yellow Taxi ----------------------------------------------------------
-# Don't have all the data yet
-
-
-# . 2.c. Public Bikes ---------------------------------------------------------
+# . 2.b. Public Bikes ---------------------------------------------------------
 
 nyc_bikes <- data.table(readRDS('NY_BikeTrips.RDS'))
 
@@ -742,4 +631,9 @@ all_bike[is.na(name),
          name := 'Unknown Name']
 saveRDS(all_bike, 
         'NYCbike_Map_all_stations.RDS')
+
+
+# Deployment
+library(rsconnect)
+rsconnect::deployApp('D:\\bigquery\\app_NYC')
 

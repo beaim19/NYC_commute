@@ -633,7 +633,4 @@ saveRDS(all_bike,
         'NYCbike_Map_all_stations.RDS')
 
 
-# Deployment
-library(rsconnect)
-rsconnect::deployApp('D:\\bigquery\\app_NYC')
 

@@ -1,7 +1,6 @@
 
 library(shiny)
 library(shinydashboard)
-# library(shinydashboardPlus)
 library(ggplot2)
 library(plotly)
 library(data.table)
@@ -10,6 +9,7 @@ library(tableHTML)
 library(dplyr)
 library(leaflet)
 library(scales)
+library(RColorBrewer)
 
 
 
@@ -23,9 +23,9 @@ taxiG_time <- readRDS('TaxiG_time.RDS')
 
 taxisG_map <- data.table(readRDS('grouped_Gtaxi_ALL_complete_month.RDS'))
 
-NYCbike_map <- data.table(readRDS('NYCbike_Map_Month_NoGender.RDS'))
+NYCbike_map <- data.table(readRDS('NYCbike_Map_month_nogender.RDS'))
 
-NATaxiGmap <- data.table(readRDS('grouped_Gtaxi_ALL.Rds'))
+NATaxiGmap <- data.table(readRDS('grouped_Gtaxi_ALL.RDS'))
 NABikeMap <- data.table(readRDS('NYCbike_Map_all_stations.RDS'))
 NATaxiGmap_long <- NATaxiGmap[is.na(long),
                               .(N = sum(N)),
@@ -45,6 +45,8 @@ ui <- fluidPage(
   
                  tags$head(tags$style(
                      HTML('
+
+.help-block {color: #fff}
          
                            #sidebarCollapsed {
                            background-color: #5AAA66;
@@ -114,7 +116,7 @@ aside#sidebarCollapsed.main-sidebar.shiny-bound-input{padding-top:0px; z-index:1
                     # --------------------------- a) header --------------------------------------------       
                      header = dashboardHeader(title = span(img(src="logo8.png", width = 250, height = 75), tags$b('New York City Commute')),
                                      tags$li(
-                                             tags$a(img(src='GitHub2.PNG',
+                                             tags$a(img(src='GitHub2.png',
                                                  width="50",height="35", padding = '0px'),
                                                  href="https:///github.com/beaim19/NYC_commute//", target = "_blank"),
                                              class = "dropdown",      
@@ -238,8 +240,9 @@ aside#sidebarCollapsed.main-sidebar.shiny-bound-input{padding-top:0px; z-index:1
                                   box(width = 3,
                                       radioButtons(inputId = 'checkridetype',
                                                    label = 'Select Ride Type',
-                                                   choices = list('Pick Up', 'Drop Off'),
-                                                   selected = 'Pick Up'))
+                                                   choices = list('Pick Up Only'='Pick Up', 'Drop Off Only' = 'Drop Off', 
+                                                                  'Both with percentage'= 'Both'),
+                                                   selected = 'Both'))
                                 ),
                                 
                                 fluidRow(
@@ -249,6 +252,10 @@ aside#sidebarCollapsed.main-sidebar.shiny-bound-input{padding-top:0px; z-index:1
                                           actionButton(inputId = 'actionhelp',
                                                        label = 'Click here for number of cases missing location data per year'),
                                           uiOutput('CoordenateMiss')),
+                                      box(with = 12,
+                                          actionButton(inputId = 'actionexplanation',
+                                                       label = 'Click here for explanation of the data'),
+                                          uiOutput('VarExplanation')),
                                       title = 'Usage Location',
                                       leafletOutput('maptaxig', height = 500))
                                 ))
@@ -303,14 +310,14 @@ server <- shinyServer(function(input, output) {
 
     req(input$checktimeday)
     req(input$checkworkingday)
-    req(input$checkridetype)
+    #req(input$checkridetype)
     req(input$checkyear)
     req(input$checkmonth)
 
     data.table(taxisG_map %>% filter(TimeDay %in% input$checktimeday & 
                                        NoWorkDay %in% input$checkworkingday &
                                        year %in% input$checkyear &
-                                       type %in% input$checkridetype &
+                                       #type %in% input$checkridetype &
                                        month %in% which(month.name == input$checkmonth)))
   })
   
@@ -327,7 +334,7 @@ server <- shinyServer(function(input, output) {
     data.table(NYCbike_map %>% filter(TimeDay %in% input$checktimeday & 
                                        NoWorkDay %in% input$checkworkingday &
                                        year %in% input$checkyear &
-                                       type %in% input$checkridetype &
+                                       #type %in% input$checkridetype &
                                        month %in%  which(month.name == input$checkmonth)))
   })
   
@@ -469,31 +476,62 @@ server <- shinyServer(function(input, output) {
   
   output$maptaxig <- renderLeaflet({
     
-    if (input$checkvehicle == 'Bike') {
+    if (input$checkvehicle == 'Bike' & input$checkridetype %in% c('Pick Up', 'Drop Off')) {
       map_data <- bike_map_subset() #NYCbike_map
       color_circle <- 'darkorange'
       sizeT <- 5
       zoom_setView <- 13
       lat_setView <- -74.00
       long_setView <- 40.75
-      
-      
-
-      }
-    if (input$checkvehicle == 'Green Taxi') {
+    }
+    
+    
+    if (input$checkvehicle == 'Bike' & input$checkridetype %in% c('Both')) {
+      map_data <- bike_map_subset() #NYCbike_map
+      map_data <- map_data[,
+                           .(N = sum(N),
+                             PropPU = round(100*sum(N[which(type == 'Pick Up')])/sum(N))),
+                           by = .(location_id, long, lat, zone)]
+      map_data[,
+               fullLabel := paste0(zone, 'Total Rides: ', N, '. ', PropPU, '% Pick Ups')]
+      sizeT <- 5
+      zoom_setView <- 13
+      lat_setView <- -74.00
+      long_setView <- 40.75
+    }
+    
+    if (input$checkvehicle == 'Green Taxi' & input$checkridetype %in% c('Pick Up', 'Drop Off')) {
       map_data <- taxisG_map_subset() #taxisG_map
+      map_data <- map_data[type == input$checkridetype]
       color_circle <- 'green'
       sizeT <- 5
       zoom_setView <- 11
       lat_setView <- -74.00
       long_setView <- 40.77
       
-
-    
     }
     
+    
+    if (input$checkvehicle == 'Green Taxi' & input$checkridetype %in% c('Both')) {
+      map_data <- taxisG_map_subset() #taxisG_map
+      map_data <- map_data[,
+               .(N = sum(N),
+                 PropPU = round(100*sum(N[which(type == 'Pick Up')])/sum(N))),
+               by = .(location_id, long, lat, zone)]
+      map_data[,
+               fullLabel := paste0(zone, 'Total Rides: ', N, '. ', PropPU, '% Pick Ups')]
 
-    if (nrow(map_data) > 1){
+      sizeT <- 5
+      zoom_setView <- 11
+      lat_setView <- -74.00
+      long_setView <- 40.77
+      
+    }
+    
+    
+    
+
+    if (nrow(map_data) > 1 & input$checkridetype %in% c('Pick Up', 'Drop Off')){
     
       leaflet(data = map_data) %>%
       addTiles() %>%
@@ -502,6 +540,26 @@ server <- shinyServer(function(input, output) {
       addProviderTiles("CartoDB.Positron") %>%
       addCircles(lng = ~long, lat = ~lat,
                  radius = ~N/sizeT, label = ~fullLabel, color = color_circle)
+      
+    } else if (nrow(map_data) > 1 & input$checkridetype %in% c('Both')){
+      
+      pal <- colorNumeric(palette = c('#cc0000', '#d11400',
+                                      '#d62900', '#db3d00',
+                                      '#e05200', '#e66600',
+                                      '#eb7a00', '#f08f00',
+                                      '#f5a300', '#fab800') , domain = 0:100) #topo.colors(20)
+      
+      leaflet(data = map_data) %>%
+        addTiles() %>%
+        fitBounds(~min(long), ~min(lat), ~max(long), ~max(lat)) %>%
+        setView(lat_setView, long_setView, zoom = zoom_setView) %>%
+        addProviderTiles("CartoDB.Positron") %>%
+        addCircles(lng = ~long, lat = ~lat,
+                   radius = ~N/sizeT, label = ~fullLabel, color = ~pal(PropPU)) %>%
+        addLegend("bottomright", pal = pal, values = seq(0, 100, 10),
+                  title = "Ratio Pick Ups/Drop Offs",
+                  labFormat = labelFormat(suffix = "%"),
+                  opacity = 1)
       
     } else {
       leaflet(data = taxisG_map) %>%
@@ -515,36 +573,70 @@ server <- shinyServer(function(input, output) {
   
   
   observe({
-    
-    if (input$checkvehicle == 'Bike') {
+
+    if (input$checkvehicle == 'Bike' & input$checkridetype %in% c('Pick Up', 'Drop Off')) {
       map_data <- bike_map_subset() #NYCbike_map
       color_circle <- 'darkorange'
       sizeT <- 5
-      
-      
-      
     }
     
-    
-    if (input$checkvehicle == 'Green Taxi') {
+    if (input$checkvehicle == 'Bike' & input$checkridetype %in% c('Both')) {
+      map_data <- bike_map_subset() #NYCbike_map
+      map_data <- map_data[,
+                           .(N = sum(N),
+                             PropPU = round(100*sum(N[which(type == 'Pick Up')])/sum(N))),
+                           by = .(location_id, long, lat, zone)]
+      map_data[,
+               fullLabel := paste0(zone, 'Total Rides: ', N, '. ', PropPU, '% Pick Ups')]
+      sizeT <- 5
+    }
+
+
+    if (input$checkvehicle == 'Green Taxi'  & input$checkridetype %in% c('Pick Up', 'Drop Off')) {
       map_data <- taxisG_map_subset() #taxisG_map
+      map_data <- map_data[type == input$checkridetype]
       color_circle <- 'green'
       sizeT <- 5
 
-      
+    }
+
+    if (input$checkvehicle == 'Green Taxi'  & input$checkridetype %in% c('Both')) {
+      map_data <- taxisG_map_subset() #taxisG_map
+      map_data <- map_data[,
+                           .(N = sum(N),
+                             PropPU = round(100*sum(N[which(type == 'Pick Up')])/sum(N))),
+                           by = .(location_id, long, lat, zone)]
+      map_data[,
+               fullLabel := paste0(zone, 'Total Rides: ', N, '. ', PropPU, '% Pick Ups')]
+
+      sizeT <- 5
+
     }
 
 
 
-    if (nrow(map_data) > 1){
-    
+    if (nrow(map_data) > 1 & input$checkridetype %in% c('Pick Up', 'Drop Off')){
+
     leafletProxy('maptaxig', data = map_data) %>%
       addCircles(lng = ~long, lat = ~lat,
                  radius = ~N/sizeT, label = ~fullLabel, color = color_circle)
+
+    } else if (nrow(map_data) > 1 & input$checkridetype %in% c('Both')) {
+
+      pal <- colorNumeric(palette = c('#cc0000', '#d11400',
+                                      '#d62900', '#db3d00',
+                                      '#e05200', '#e66600',
+                                      '#eb7a00', '#f08f00',
+                                      '#f5a300', '#fab800') , domain = 0:100) #topo.colors(20)
+
+      leafletProxy('maptaxig', data = map_data) %>%
+        addCircles(lng = ~long, lat = ~lat,
+                   radius = ~N/sizeT, label = ~fullLabel, color = ~pal(PropPU))
+
     } else{
       leafletProxy('maptaxig', data = taxisG_map) %>%
         addControl('No Data available For that selection of vehicle, year and month', 'topleft')
-      
+
     }
 
   })
@@ -598,11 +690,28 @@ server <- shinyServer(function(input, output) {
       return()
     }
     
-  
+   })
+     
+     output$VarExplanation = renderUI({
+       if (input$actionexplanation %% 2){
+         helpText(HTML("Data downloaded from the new_york_citibike and new_york_taxi_trips
+                       public data in the Google Cloud Platform. Taxi data can also be 
+                       downloaded from the TLC NYC official website.<br>
+
+                       'Weekend/Holiday' includes weekends and bank holidays in the US.<br>
+
+                       Taxi location data correspond to the TLC Taxi Zones in NYC.<br>
+
+                       Bike location data correspond to Citibike Stations in NYC."))
+       } else {
+         return()
+       }
+     })
+     
     
      
       
-  })
+  
   
   
   
